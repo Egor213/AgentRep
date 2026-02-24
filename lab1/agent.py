@@ -1,55 +1,125 @@
 import time
 from socket_client import SocketClient
 from flags import FLAGS
-from typing import Any, Callable, Union
 from msg_parser import MsgParser
 
 
+class InitError(Exception):
+    pass
+
 class Agent:
-    def __init__(self, team_name, version=7):
+    def __init__(self, team_name, version=7, is_goalie=False):
         self.team = team_name
         self.version = version
         self.running = False
+        self.is_goalie = is_goalie
+        self.side = None
+        self.player_number = None
+        self.game_mode = None
         self.socket = SocketClient()
-
-    def _transform_value(self, value: Any, cast_type: Callable) -> Any:
-        try:
-            return cast_type(value)
-        except Exception:
-            return value
 
     def connect(self):
         cmd = f"(init {self.team} (version {self.version}))"
         self.socket.send(cmd)
 
-    def move(self, x: Union[str, int], y: Union[str, int]):
-        cmd = f"(move {self._transform_value(x, str)} {self._transform_value(y, str)})"
+        start = time.time()
+        while time.time() - start < 3:
+            data = self.socket.receive()
+            if self._process_init_msg(data):
+                break
+        else:
+            self.stop()
+            raise InitError("Не удалось получить подтверждение инициализации от сервера")
+
+    def _process_init_msg(self, data: str) -> bool:
+        parsed = MsgParser.parse_msg(data)
+        if not parsed or parsed[0] != "init":
+            return False
+        
+        self.side = parsed[1]
+        self.player_number = parsed[2]
+        self.game_mode = parsed[3]
+
+        return True
+
+
+    def move(self, x: str | int, y: str | int):
+        """
+        До начала игры или после гола.
+        -54 <= x <= 54
+        -32 <= y <= 32
+        """
+        cmd = f"(move {x} {y})"
         self.socket.send(cmd)
 
-    def turn(self, moment: Union[str, int]):
-        cmd = f"(turn {self._transform_value(moment, int)})"
+
+    def turn(self, moment: str | int):
+        """
+        Повернуться относительно текущего положения.
+        -180 <= moment <= 180
+        """
+        cmd = f"(turn {moment})"
+        self.socket.send(cmd)
+
+    def turn_neck(self, moment: str | int):
+        """
+        Поворот головы
+        """
+        cmd = f"(turn_neck {moment})"
+        self.socket.send(cmd)
+
+    def kick(self, power: str | int, direction: str | int):
+        """
+        Пнуть мяч.
+        -100 <= power <= 100
+        """
+        cmd = f"(kick {power} {direction})"
+        self.socket.send(cmd)
+
+    def catch(self, direction: str | int):
+        """
+        Поймать мяч. Только для вратаря, расстояние до мяча не меньше 2.
+        -180 <= direction <= 180
+        """
+        cmd = f"(catch {direction})"
+        self.socket.send(cmd)
+
+    def dash(self, power: str | int):
+        """
+        Дает ускорение игроку в направлении тела.
+        -100 <= power <= 100
+        """
+        cmd = f"(turn_neck {power})"
+        self.socket.send(cmd)
+
+    def say(self, msg: str):
+        """
+        Передать аудиосообщение.
+        """
+        cmd = f"(say {msg})"
         self.socket.send(cmd)
 
     def process_message(self, msg: str):
-        print(msg)
         parsed = MsgParser.parse_msg(msg)
-        print(parsed)
+        if parsed[0] == "see":
+            _, _, *flags = parsed
+            for flag_info in flags:
+                flag_name = "".join(map(str, flag_info[0]))
+                x, y = FLAGS[flag_name]
 
 
 
-    def run(self):
+    def run(self, start_pos: tuple[int, int]):
         self.connect()
-        time.sleep(0.1)
+        self.move(*start_pos)
         self.running = True
-            
-        while self.running:
-            while self.running:
-                data = self.socket.receive()
-                if data is None:
-                    break
-                self.process_message(data)
 
-            time.sleep(0.05)
+        while self.running:
+            data = self.socket.receive()
+            self.process_message(data)
+
+
+
 
     def stop(self):
         self.running = False

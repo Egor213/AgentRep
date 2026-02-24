@@ -1,18 +1,17 @@
 import re
-from typing import List
 
 
 
 class MsgParser:
     @staticmethod
-    def tokenize(msg: str) -> List[str]:
+    def tokenize(msg: str) -> list[str]:
         msg = msg.rstrip('\u0000')
         pattern = r'\(|\)|[-+]?\d*\.?\d+|[\\"]?\w+[\\"]?'
         # pattern = r'/(\(|[-\d\.]+|[\\\"\w]+|\))/g'
         return re.findall(pattern, msg)
 
     @staticmethod
-    def parse(tokens: List[str], idx: int = 0):
+    def parse(tokens: list[str], idx: int = 0):
         result = []
         while idx < len(tokens):
             tok = tokens[idx]

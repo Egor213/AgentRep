@@ -1,0 +1,326 @@
+
+
+# ===== FILE: src/socket_client.py =====
+
+import socket
+
+class SocketClient:
+    def __init__(self, host: str = "localhost", port: int = 6000):
+        self.host = host
+        self.port = port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    def send(self, msg: str) -> None:
+        self.sock.sendto(msg.encode(), (self.host, self.port))
+
+    def receive(self, bufsize: int = 4096) -> str | None:
+        data = self.sock.recv(bufsize)
+        return data.decode()
+
+    def close(self) -> None:
+        self.sock.close()
+
+
+# ===== FILE: src/flags.py =====
+
+FLAGS = {
+    "fc": (0.0, 0.0),
+    "ftl50": (-50.0, 39.0),
+    "ftl40": (-40.0, 39.0),
+    "ftl30": (-30.0, 39.0),
+    "ftl20": (-20.0, 39.0),
+    "ftl10": (-10.0, 39.0),
+    "ft0": (0.0, 39.0),
+    "ftr10": (10.0, 39.0),
+    "ftr20": (20.0, 39.0),
+    "ftr30": (30.0, 39.0),
+    "ftr40": (40.0, 39.0),
+    "ftr50": (50.0, 39.0),
+    "fbl50": (-50.0, -39.0),
+    "fbl40": (-40.0, -39.0),
+    "fbl30": (-30.0, -39.0),
+    "fbl20": (-20.0, -39.0),
+    "fbl10": (-10.0, -39.0),
+    "fb0": (0.0, -39.0),
+    "fbr10": (10.0, -39.0),
+    "fbr20": (20.0, -39.0),
+    "fbr30": (30.0, -39.0),
+    "fbr40": (40.0, -39.0),
+    "fbr50": (50.0, -39.0),
+    "flt30": (-57.5, 30.0),
+    "flt20": (-57.5, 20.0),
+    "flt10": (-57.5, 10.0),
+    "fl0": (-57.5, 0.0),
+    "flb10": (-57.5, -10.0),
+    "flb20": (-57.5, -20.0),
+    "flb30": (-57.5, -30.0),
+    "frt30": (57.5, 30.0),
+    "frt20": (57.5, 20.0),
+    "frt10": (57.5, 10.0),
+    "fr0": (57.5, 0.0),
+    "frb10": (57.5, -10.0),
+    "frb20": (57.5, -20.0),
+    "frb30": (57.5, -30.0),
+    "fglt": (-52.5, 7.01),
+    "fglb": (-52.5, -7.01),
+    "gl": (-52.5, 0.0),
+    "gr": (52.5, 0.0),
+    "fplt": (-36.0, 20.15),
+    "fplc": (-36.0, 0.0),
+    "fplb": (-36.0, -20.15),
+    "fgrt": (52.5, 7.01),
+    "fgrb": (52.5, -7.01),
+    "fprt": (36.0, 20.15),
+    "fprc": (36.0, 0.0),
+    "fprb": (36.0, -20.15),
+    "flt": (-52.5, 34.0),
+    "fct": (0.0, 34.0),
+    "frt": (52.5, 34.0),
+    "flb": (-52.5, -34.0),
+    "fcb": (0.0, -34.0),
+    "frb": (52.5, -34.0),
+}
+
+
+# ===== FILE: src/msg_parser.py =====
+
+import re
+
+
+
+class MsgParser:
+    @staticmethod
+    def tokenize(msg: str) -> list[str]:
+        msg = msg.rstrip('\u0000')
+        pattern = r'\(|\)|[-+]?\d*\.?\d+|[\\"]?\w+[\\"]?'
+        # pattern = r'/(\(|[-\d\.]+|[\\\"\w]+|\))/g'
+        return re.findall(pattern, msg)
+
+    @staticmethod
+    def parse(tokens: list[str], idx: int = 0):
+        result = []
+        while idx < len(tokens):
+            tok = tokens[idx]
+            if tok == '(':
+                sublist, idx = MsgParser.parse(tokens, idx + 1)
+                result.append(sublist)
+            elif tok == ')':
+                return result, idx + 1
+            else:
+                try:
+                    if '.' in tok:
+                        val = float(tok)
+                    else:
+                        val = int(tok)
+                except ValueError:
+                    val = tok
+                result.append(val)
+                idx += 1
+        return result, idx
+
+    @staticmethod
+    def parse_msg(msg: str) -> list | None:
+        tokens = MsgParser.tokenize(msg)
+        parsed, _ = MsgParser.parse(tokens)
+        return parsed[0] if parsed else None
+
+# ===== FILE: src/agent.py =====
+
+import time
+import math
+import numpy as np
+from src.socket_client import SocketClient
+from src.flags import FLAGS
+from src.msg_parser import MsgParser
+
+
+class InitError(Exception):
+    pass
+
+class Agent:
+    def __init__(self, team_name, version=7, is_goalie=False):
+        self.team = team_name
+        self.version = version
+        self.running = False
+        self.is_goalie = is_goalie
+        self.side = None
+        self.player_number = None
+        self.game_mode = None
+        self.socket = SocketClient()
+        
+        self.x = None
+        self.y = None
+        self.angle = 0
+        
+        self.visible_flags = []
+        self.last_position_print = time.time()
+
+    def connect(self):
+        cmd = f"(init {self.team} (version {self.version}))"
+        self.socket.send(cmd)
+
+        start = time.time()
+        while time.time() - start < 3:
+            data = self.socket.receive()
+            if self._process_init_msg(data):
+                break
+        else:
+            self.stop()
+            raise InitError("Не удалось получить подтверждение инициализации от сервера")
+
+    def _process_init_msg(self, data: str) -> bool:
+        parsed = MsgParser.parse_msg(data)
+        if not parsed or parsed[0] != "init":
+            return False
+        
+        self.side = parsed[1]
+        self.player_number = parsed[2]
+        self.game_mode = parsed[3]
+
+        return True
+
+    def move(self, x: str | int, y: str | int):
+        """
+        До начала игры или после гола.
+        -54 <= x <= 54
+        -32 <= y <= 32
+        """
+        cmd = f"(move {x} {y})"
+        self.socket.send(cmd)
+        
+
+    def turn(self, moment: str | int):
+        """
+        Повернуться относительно текущего положения.
+        -180 <= moment <= 180
+        """
+        cmd = f"(turn {moment})"
+        self.socket.send(cmd)
+        self.angle += float(moment)
+
+    def turn_neck(self, moment: str | int):
+        """
+        Поворот головы
+        """
+        cmd = f"(turn_neck {moment})"
+        self.socket.send(cmd)
+
+    def kick(self, power: str | int, direction: str | int):
+        """
+        Пнуть мяч.
+        -100 <= power <= 100
+        """
+        cmd = f"(kick {power} {direction})"
+        self.socket.send(cmd)
+
+    def catch(self, direction: str | int):
+        """
+        Поймать мяч. Только для вратаря, расстояние до мяча не меньше 2.
+        -180 <= direction <= 180
+        """
+        cmd = f"(catch {direction})"
+        self.socket.send(cmd)
+
+    def dash(self, power: str | int):
+        """
+        Дает ускорение игроку в направлении тела.
+        -100 <= power <= 100
+        """
+        cmd = f"(dash {power})" 
+        self.socket.send(cmd)
+
+    def say(self, msg: str):
+        """
+        Передать аудиосообщение.
+        """
+        cmd = f"(say {msg})"
+        self.socket.send(cmd)
+
+    def process_message(self, msg: str):
+        parsed = MsgParser.parse_msg(msg)
+        if not parsed:
+            return
+            
+        msg_type = parsed[0]
+        
+        if msg_type == "see":
+            self._process_see_message(parsed)
+        elif msg_type == "hear":
+            self._process_hear_message(parsed)
+    
+    def _process_hear_message(self, parsed: list):
+        pass
+
+    def _process_see_message(self, parsed: list):
+        pass
+    
+
+    def run(self, start_pos: tuple[int, int], rotation_speed: float = 2):
+        self.connect()
+        self.move(*start_pos)
+        self.rotation_speed = rotation_speed
+        self.running = True
+        self.last_turn_time = time.time()
+        
+        print(f"Агент запущен. Команда: {self.team}, номер: {self.player_number}, сторона: {self.side}")
+        print(f"Начальная позиция: {start_pos}, скорость вращения: {rotation_speed}")
+
+        while self.running:
+            data = self.socket.receive()
+            self.process_message(data)
+
+
+    def stop(self):
+        self.running = False
+        self.socket.send("(bye)")
+        self.socket.close()
+        print("Агент остановлен")
+
+
+
+# ===== FILE: src/geometry.py =====
+
+# import numpy as np
+
+
+# def circle_intersection(center_1: tuple, radius_1, center_2: tuple, radius_2):
+#     c1 = np.array(center_1)
+#     c2 = np.array(center_2)
+
+#     # Расстояние между центрами окружностей
+#     d_vec = c2 - c1
+#     d = np.linalg.norm(d_vec)
+
+#     # r2**2 = r1**2 + d**2 - 2 * r1 * d * cos (alpha)
+#     # a = r1 * cos (alpha)
+#     a = (radius_1**2 - radius_2**2 + d**2) / (2 * d)
+    
+#     h = np.sqrt(radius_1**2 - a**2)
+
+#     p_mid = c1 + (a / d) * d_vec
+    
+#     # Единичный вектор перпендикуляра
+#     perp = np.array([-d_vec[1], d_vec[0]]) / d
+    
+#     if h < 1e-10:  # касание
+#         return [(float(p_mid[0]), float(p_mid[1]))]
+    
+#     return [
+#         (float(p_mid[0] + h * perp[0]), float(p_mid[1] + h * perp[1])),
+#         (float(p_mid[0] - h * perp[0]), float(p_mid[1] - h * perp[1]))
+#     ]
+
+
+# ===== FILE: src/main.py =====
+
+from agent import Agent
+
+if __name__ == '__main__':
+    agent = Agent("team")
+    try:
+        agent.run(start_pos=(15, 0))
+    except KeyboardInterrupt:
+        agent.stop()
+    except Exception as e:
+        print(f"Ошибка: {e}")
+        agent.stop()

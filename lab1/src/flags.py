@@ -1,3 +1,7 @@
+# ===== FILE: src/flags.py =====
+
+import math
+
 FLAGS = {
     "fc": (0.0, 0.0),
     "ftl50": (-50.0, 39.0),
@@ -55,3 +59,11 @@ FLAGS = {
     "fcb": (0.0, -34.0),
     "frb": (52.5, -34.0),
 }
+
+
+def obj_name_to_key(name_parts: list) -> str:
+    return "".join(map(str, name_parts))
+
+
+def distance(p1: tuple, p2: tuple) -> float:
+    return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)

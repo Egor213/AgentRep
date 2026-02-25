@@ -33,7 +33,7 @@ class MsgParser:
         return result, idx
 
     @staticmethod
-    def parse_msg(msg: str):
+    def parse_msg(msg: str) -> list | None:
         tokens = MsgParser.tokenize(msg)
         parsed, _ = MsgParser.parse(tokens)
         return parsed[0] if parsed else None

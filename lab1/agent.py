@@ -1,4 +1,6 @@
 import time
+import math
+import numpy as np
 from socket_client import SocketClient
 from flags import FLAGS
 from msg_parser import MsgParser
@@ -17,6 +19,13 @@ class Agent:
         self.player_number = None
         self.game_mode = None
         self.socket = SocketClient()
+        
+        self.x = None
+        self.y = None
+        self.angle = 0
+        
+        self.visible_flags = []
+        self.last_position_print = time.time()
 
     def connect(self):
         cmd = f"(init {self.team} (version {self.version}))"
@@ -42,7 +51,6 @@ class Agent:
 
         return True
 
-
     def move(self, x: str | int, y: str | int):
         """
         До начала игры или после гола.
@@ -51,7 +59,7 @@ class Agent:
         """
         cmd = f"(move {x} {y})"
         self.socket.send(cmd)
-
+        
 
     def turn(self, moment: str | int):
         """
@@ -60,6 +68,7 @@ class Agent:
         """
         cmd = f"(turn {moment})"
         self.socket.send(cmd)
+        self.angle += float(moment)
 
     def turn_neck(self, moment: str | int):
         """
@@ -89,7 +98,7 @@ class Agent:
         Дает ускорение игроку в направлении тела.
         -100 <= power <= 100
         """
-        cmd = f"(turn_neck {power})"
+        cmd = f"(dash {power})" 
         self.socket.send(cmd)
 
     def say(self, msg: str):
@@ -101,27 +110,41 @@ class Agent:
 
     def process_message(self, msg: str):
         parsed = MsgParser.parse_msg(msg)
-        if parsed[0] == "see":
-            _, _, *flags = parsed
-            for flag_info in flags:
-                flag_name = "".join(map(str, flag_info[0]))
-                x, y = FLAGS[flag_name]
+        if not parsed:
+            return
+            
+        msg_type = parsed[0]
+        
+        if msg_type == "see":
+            self._process_see_message(parsed)
+        elif msg_type == "hear":
+            self._process_hear_message(parsed)
+    
+    def _process_hear_message(self, parsed: list):
+        pass
 
+    def _process_see_message(self, parsed: list):
+        pass
+    
 
-
-    def run(self, start_pos: tuple[int, int]):
+    def run(self, start_pos: tuple[int, int], rotation_speed: float = 2):
         self.connect()
         self.move(*start_pos)
+        self.rotation_speed = rotation_speed
         self.running = True
+        self.last_turn_time = time.time()
+        
+        print(f"Агент запущен. Команда: {self.team}, номер: {self.player_number}, сторона: {self.side}")
+        print(f"Начальная позиция: {start_pos}, скорость вращения: {rotation_speed}")
 
         while self.running:
             data = self.socket.receive()
             self.process_message(data)
 
 
-
-
     def stop(self):
         self.running = False
         self.socket.send("(bye)")
         self.socket.close()
+        print("Агент остановлен")
+

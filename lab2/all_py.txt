@@ -1,0 +1,718 @@
+
+
+# ===== FILE: src/socket_client.py =====
+
+import socket
+
+
+class SocketClient:
+    def __init__(self, host: str = "localhost", port: int = 6000):
+        self.host = host
+        self.port = port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.settimeout(3.0)
+
+    def send(self, msg: str) -> None:
+        self.sock.sendto(msg.encode(), (self.host, self.port))
+
+    def receive(self, bufsize: int = 8192) -> str | None:
+        try:
+            data, _ = self.sock.recvfrom(bufsize)
+            return data.decode()
+        except socket.timeout:
+            return None
+
+    def close(self) -> None:
+        self.sock.close()
+
+
+# ===== FILE: src/flags.py =====
+
+# ===== FILE: src/flags.py =====
+
+import math
+
+FLAGS = {
+    "fc": (0.0, 0.0),
+    "ftl50": (-50.0, 39.0),
+    "ftl40": (-40.0, 39.0),
+    "ftl30": (-30.0, 39.0),
+    "ftl20": (-20.0, 39.0),
+    "ftl10": (-10.0, 39.0),
+    "ft0": (0.0, 39.0),
+    "ftr10": (10.0, 39.0),
+    "ftr20": (20.0, 39.0),
+    "ftr30": (30.0, 39.0),
+    "ftr40": (40.0, 39.0),
+    "ftr50": (50.0, 39.0),
+    "fbl50": (-50.0, -39.0),
+    "fbl40": (-40.0, -39.0),
+    "fbl30": (-30.0, -39.0),
+    "fbl20": (-20.0, -39.0),
+    "fbl10": (-10.0, -39.0),
+    "fb0": (0.0, -39.0),
+    "fbr10": (10.0, -39.0),
+    "fbr20": (20.0, -39.0),
+    "fbr30": (30.0, -39.0),
+    "fbr40": (40.0, -39.0),
+    "fbr50": (50.0, -39.0),
+    "flt30": (-57.5, 30.0),
+    "flt20": (-57.5, 20.0),
+    "flt10": (-57.5, 10.0),
+    "fl0": (-57.5, 0.0),
+    "flb10": (-57.5, -10.0),
+    "flb20": (-57.5, -20.0),
+    "flb30": (-57.5, -30.0),
+    "frt30": (57.5, 30.0),
+    "frt20": (57.5, 20.0),
+    "frt10": (57.5, 10.0),
+    "fr0": (57.5, 0.0),
+    "frb10": (57.5, -10.0),
+    "frb20": (57.5, -20.0),
+    "frb30": (57.5, -30.0),
+    "fglt": (-52.5, 7.01),
+    "fglb": (-52.5, -7.01),
+    "gl": (-52.5, 0.0),
+    "gr": (52.5, 0.0),
+    "fplt": (-36.0, 20.15),
+    "fplc": (-36.0, 0.0),
+    "fplb": (-36.0, -20.15),
+    "fgrt": (52.5, 7.01),
+    "fgrb": (52.5, -7.01),
+    "fprt": (36.0, 20.15),
+    "fprc": (36.0, 0.0),
+    "fprb": (36.0, -20.15),
+    "flt": (-52.5, 34.0),
+    "fct": (0.0, 34.0),
+    "frt": (52.5, 34.0),
+    "flb": (-52.5, -34.0),
+    "fcb": (0.0, -34.0),
+    "frb": (52.5, -34.0),
+}
+
+
+def obj_name_to_key(name_parts: list) -> str:
+    return "".join(map(str, name_parts))
+
+
+def distance(p1: tuple, p2: tuple) -> float:
+    return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
+
+
+# ===== FILE: src/msg_parser.py =====
+
+import re
+
+
+class MsgParser:
+    @staticmethod
+    def tokenize(msg: str) -> list[str]:
+        msg = msg.rstrip("\x00")
+        pattern = r'\(|\)|[-+]?\d+\.?\d*(?:e[-+]?\d+)?|"[^"]*"|[\w]+'
+        return re.findall(pattern, msg, re.IGNORECASE)
+
+    @staticmethod
+    def parse(tokens: list[str], idx: int = 0):
+        result = []
+        while idx < len(tokens):
+            tok = tokens[idx]
+            if tok == "(":
+                sublist, idx = MsgParser.parse(tokens, idx + 1)
+                result.append(sublist)
+            elif tok == ")":
+                return result, idx + 1
+            else:
+                tok_stripped = tok.strip('"')
+                try:
+                    if "." in tok_stripped or "e" in tok_stripped.lower():
+                        val = float(tok_stripped)
+                    else:
+                        val = int(tok_stripped)
+                except ValueError:
+                    val = tok_stripped
+                result.append(val)
+                idx += 1
+        return result, idx
+
+    @staticmethod
+    def parse_msg(msg: str) -> list | None:
+        tokens = MsgParser.tokenize(msg)
+        if not tokens:
+            return None
+        parsed, _ = MsgParser.parse(tokens)
+        return parsed[0] if parsed else None
+
+
+# ===== FILE: src/agent.py =====
+
+import time
+from socket_client import SocketClient
+from flags import FLAGS, obj_name_to_key
+from msg_parser import MsgParser
+from geometry import (
+    compute_position_two_flags,
+    compute_position_three_flags,
+    compute_object_position,
+)
+
+from controller import Controller
+
+
+
+class InitError(Exception):
+    pass
+
+
+class Agent:
+    def __init__(self, team_name, controller, version=7, is_goalie=False):
+        self.team = team_name
+        self.version = version
+        self.is_goalie = is_goalie
+        self.side = None
+        self.player_number = None
+        self.game_mode = None
+        self.socket = SocketClient()
+        self.play_on = False
+        self.running = False
+
+        self.x = None
+        self.y = None
+
+        self.visible_objects = {}
+        self.controller = controller
+
+    def connect(self):
+        goalie_str = " (goalie)" if self.is_goalie else ""
+        cmd = f"(init {self.team} (version {self.version}){goalie_str})"
+        self.socket.send(cmd)
+
+        start = time.time()
+        while time.time() - start < 5:
+            data = self.socket.receive()
+            if data and self._process_init_msg(data):
+                break
+        else:
+            self.stop()
+            raise InitError("Не удалось получить подтверждение инициализации от сервера")
+
+    def _process_init_msg(self, data: str) -> bool:
+        parsed = MsgParser.parse_msg(data)
+        if not parsed or parsed[0] != "init":
+            return False
+        self.side = parsed[1]
+        self.player_number = parsed[2]
+        self.game_mode = parsed[3] if len(parsed) > 3 else None
+        return True
+
+    def move(self, x, y):
+        """
+        До начала игры или после гола.
+        -54 <= x <= 54
+        -32 <= y <= 32
+        """
+        self.socket.send(f"(move {x} {y})")
+
+    def turn(self, moment):
+        """
+        Повернуться относительно текущего положения.
+        -180 <= moment <= 180
+        """
+        self.socket.send(f"(turn {moment})")
+
+    def dash(self, power):
+        """
+        Дает ускорение игроку в направлении тела.
+        -100 <= power <= 100
+        """
+        self.socket.send(f"(dash {power})")
+
+    def kick(self, power, direction):
+        """
+        Пнуть мяч.
+        -100 <= power <= 100
+        """
+        self.socket.send(f"(kick {power} {direction})")
+
+    def catch_ball(self, direction):
+        """
+        Поймать мяч. Только для вратаря, расстояние до мяча не меньше 2.
+        -180 <= direction <= 180
+        """
+        self.socket.send(f"(catch {direction})")
+
+    def say(self, msg):
+        """
+        Передать аудиосообщение.
+        """
+        self.socket.send(f"(say {msg})")
+
+    def turn_neck(self, angle):
+        """
+        Поворот головы
+        """
+        self.socket.send(f"(turn_neck {angle})")
+
+    def _send_command(self, cmd: str, params: str):
+        self.socket.send(f"({cmd} {params})")
+
+    def process_message(self, msg: str):
+        parsed = MsgParser.parse_msg(msg)
+        if not parsed:
+            return
+
+        msg_type = parsed[0]
+        if msg_type == "see":
+            self._process_see(parsed)
+        elif msg_type == "hear":
+            self._process_hear(parsed)
+
+    def _process_hear(self, parsed: list):
+        if len(parsed) < 4:
+            return
+
+        time = parsed[1]
+        sender = parsed[2]
+        message = parsed[3] if len(parsed) > 3 else ""
+
+        if sender == "referee":
+            msg_str = str(message)
+            print(f"рефери говорит: {msg_str}")
+
+            if msg_str in ("play_on",):
+                self.play_on = True
+            elif msg_str.startswith("kick_off"):
+                self.play_on = False
+            elif msg_str.startswith("goal_"):
+                self.play_on = False
+                self.controller.reset()
+
+    def _process_see(self, parsed: list):
+        """
+        ['see', 0, [['f', 'c'], 15, 0, 0, 0], [['f', 'r', 't'], 75.9, -27],
+        [['f', 'r', 'b'], 75.9, 27], [['f', 'g', 'r', 'b'], 68, 6],
+        [['g', 'r'], 67.4, 0], [['f', 'g', 'r', 't'], 68, -6],
+        [['f', 'p', 'r', 'b'], 54.6, 22], [['f', 'p', 'r', 'c'], 50.9, 0],
+        [['f', 'p', 'r', 't'], 54.6, -22], [['f', 't', 'r', 30], 59.7, -41],
+        [['f', 't', 'r', 40], 67.4, -35], [['f', 't', 'r', 50], 75.9, -31],
+        [['f', 'b', 'r', 30], 59.7, 41], [['f', 'b', 'r', 40], 67.4, 35],
+        [['f', 'b', 'r', 50], 75.9, 31], [['f', 'r', 0], 72.2, 0],
+        [['f', 'r', 't', 10], 73, -8], [['f', 'r', 't', 20], 75.2, -15],
+        [['f', 'r', 't', 30], 78.3, -22], [['f', 'r', 'b', 10], 73, 8],
+        [['f', 'r', 'b', 20], 75.2, 15], [['f', 'r', 'b', 30], 78.3, 22],
+        [['b'], 14.9, 0, 0, 0], [['l', 'r'], 67.4, 90]]
+        """
+        if len(parsed) < 2:
+            return
+
+        see_time = parsed[1]
+        self.visible_objects = {}
+
+        for i in range(2, len(parsed)):
+            obj_info = parsed[i]
+            if not isinstance(obj_info, list) or len(obj_info) < 2:
+                continue
+
+            obj_name_raw = obj_info[0]
+            params = obj_info[1:]
+
+            if not isinstance(obj_name_raw, list):
+                continue
+
+            key = obj_name_to_key(obj_name_raw)
+            entry = {"name": obj_name_raw, "dist": float(params[0])}
+
+            if len(params) >= 2:
+                entry["dir"] = float(params[1])
+            if len(params) >= 3:
+                entry["dist_change"] = float(params[2])
+            if len(params) >= 4:
+                entry["dir_change"] = float(params[3])
+            if len(params) >= 5:
+                entry["body_facing_dir"] = float(params[4])
+            if len(params) >= 6:
+                entry["head_facing_dir"] = float(params[5])
+
+            self.visible_objects[key] = entry
+
+        self._compute_my_position()
+
+        self._compute_objects_positions()
+
+        decision = self.controller.decide(self.visible_objects, self.play_on)
+        if decision:
+            cmd, params = decision
+            self._send_command(cmd, params)
+
+    def _compute_my_position(self):
+        flag_observations = []
+        for key, obj in self.visible_objects.items():
+            if key in FLAGS:
+                flag_observations.append((key, obj["dist"]))
+
+        if len(flag_observations) < 2:
+            return
+
+        f1_key, d1 = flag_observations[0]
+        f2_key, d2 = flag_observations[1]
+
+        if len(flag_observations) >= 3:
+            f3_key, d3 = flag_observations[2]
+            pos = compute_position_three_flags(f1_key, d1, f2_key, d2, f3_key, d3)
+            if pos is None:
+                pos = compute_position_two_flags(f1_key, d1, f2_key, d2)
+        else:
+            pos = compute_position_two_flags(f1_key, d1, f2_key, d2)
+
+        if pos:
+            self.x, self.y = pos
+            print(f"Позиция игрока x={self.x:.2f}, y={self.y:.2f}")
+
+    def _compute_objects_positions(self):
+        if self.x is None or self.y is None:
+            return
+
+        flag_for_ref = None
+        for key, obj in self.visible_objects.items():
+            if key in FLAGS and "dir" in obj:
+                flag_for_ref = (key, obj["dist"], obj["dir"])
+                break
+
+        if flag_for_ref is None:
+            return
+
+        fk, fd, fa = flag_for_ref
+        for key, obj in self.visible_objects.items():
+            if key in FLAGS or "dir" not in obj:
+                continue
+            obj_dist = obj["dist"]
+            obj_dir = obj["dir"]
+
+            pos = compute_object_position(self.x, self.y, fk, fd, fa, obj_dist, obj_dir)
+
+            if pos:
+                # Сохраним на будущее
+                obj["computed_x"] = pos[0]
+                obj["computed_y"] = pos[1]
+                name_parts = obj.get("name", [])
+
+                if name_parts and name_parts[0] == "p":
+                    team = name_parts[1] if len(name_parts) > 1 else "?"
+                    num = name_parts[2] if len(name_parts) > 2 else "?"
+                    print(f"Игрок {team}#{num}: x={pos[0]:.2f}, y={pos[1]:.2f}")
+                elif name_parts and name_parts[0] == "b":
+                    print(f"Мяч: x={pos[0]:.2f}, y={pos[1]:.2f}")
+
+    def run(self, start_pos: tuple[int, int]):
+        self.connect()
+        self.move(*start_pos)
+        self.running = True
+
+        print(
+            f"Команда: {self.team}, номер: {self.player_number}, сторона: {self.side}, начальная позиция: {start_pos}"
+        )
+
+        while self.running:
+            data = self.socket.receive()
+            if data:
+                self.process_message(data)
+
+
+    def stop(self):
+        self.running = False
+        try:
+            self.socket.send("(bye)")
+            self.socket.close()
+        except Exception:
+            pass
+        print("Агент остановлен")
+
+
+# ===== FILE: src/geometry.py =====
+
+import math
+from flags import FLAGS
+
+FIELD_WIDTH = 54
+FIELD_HEIGHT = 32
+
+
+def compute_position_two_flags(
+    flag1_key: str,
+    d1: float,
+    flag2_key: str,
+    d2: float,
+):
+    x1, y1 = FLAGS[flag1_key]
+    x2, y2 = FLAGS[flag2_key]
+
+    solutions = _solve_two_circles(x1, y1, d1, x2, y2, d2)
+
+    if not solutions:
+        return None
+
+    valid = []
+    for sx, sy in solutions:
+        if -FIELD_WIDTH <= sx <= FIELD_WIDTH and -FIELD_HEIGHT <= sy <= FIELD_HEIGHT:
+            valid.append((sx, sy))
+
+    if not valid:
+        valid = solutions
+
+    return valid[0]
+
+
+def _solve_two_circles(x1, y1, d1, x2, y2, d2):
+    solutions = []
+
+    EPS = 1e-9
+
+    if abs(x2 - x1) < EPS and abs(y2 - y1) < EPS:
+        return []
+
+    if abs(x2 - x1) < EPS:
+        y = (y2 ** 2 - y1 ** 2 + d1 ** 2 - d2 ** 2) / (2 * (y2 - y1))
+        det = d1 ** 2 - (y - y1) ** 2
+        if det < 0:
+            return []
+        det = max(det, 0)
+        sq = math.sqrt(det)
+        solutions.append((x1 + sq, y))
+        solutions.append((x1 - sq, y))
+        return solutions
+
+    if abs(y2 - y1) < EPS:
+        x = (x2 ** 2 - x1 ** 2 + d1 ** 2 - d2 ** 2) / (2 * (x2 - x1))
+        det = d1 ** 2 - (x - x1) ** 2
+        if det < 0:
+            return []
+        det = max(det, 0)
+        sq = math.sqrt(det)
+        solutions.append((x, y1 + sq))
+        solutions.append((x, y1 - sq))
+        return solutions
+
+    # x = alpha * y + beta
+    alpha = (y1 - y2) / (x2 - x1)
+    beta = (y2**2 - y1**2 + x2**2 - x1**2 + d1**2 - d2**2) / (2 * (x2 - x1))
+
+    # Подставляем в первое уравнение: (alpha*y + beta - x1)^2 + (y - y1)^2 = d1^2
+    # (alpha^2 + 1) * y^2 - 2*(alpha*(x1-beta) + y1)*y + (x1-beta)^2 + y1^2 - d1^2 = 0
+    a_coef = alpha**2 + 1
+    b_coef = -2 * (alpha * (x1 - beta) + y1)
+    c_coef = (x1 - beta) ** 2 + y1**2 - d1**2
+
+    discriminant = b_coef**2 - 4 * a_coef * c_coef
+
+    if discriminant < 0:
+        return []
+
+    sq_disc = math.sqrt(discriminant)
+
+    y_sol1 = (-b_coef + sq_disc) / (2 * a_coef)
+    y_sol2 = (-b_coef - sq_disc) / (2 * a_coef)
+
+    x_sol1 = alpha * y_sol1 + beta
+    x_sol2 = alpha * y_sol2 + beta
+
+    solutions.append((x_sol1, y_sol1))
+    if abs(y_sol1 - y_sol2) > EPS or abs(x_sol1 - x_sol2) > EPS:
+        solutions.append((x_sol2, y_sol2))
+
+    return solutions
+
+
+def compute_position_three_flags(
+    flag1_key: str, d1: float, flag2_key: str, d2: float, flag3_key: str, d3: float
+):
+    x1, y1 = FLAGS[flag1_key]
+    x2, y2 = FLAGS[flag2_key]
+    x3, y3 = FLAGS[flag3_key]
+
+    EPS = 1e-9
+
+    if abs(x2 - x1) < EPS or abs(x3 - x1) < EPS:
+        return compute_position_two_flags(flag1_key, d1, flag2_key, d2)
+
+    alpha1 = (y1 - y2) / (x2 - x1)
+    beta1 = (y2**2 - y1**2 + x2**2 - x1**2 + d1**2 - d2**2) / (2 * (x2 - x1))
+
+    alpha2 = (y1 - y3) / (x3 - x1)
+    beta2 = (y3**2 - y1**2 + x3**2 - x1**2 + d1**2 - d3**2) / (2 * (x3 - x1))
+
+    y = (beta1 - beta2) / (alpha2 - alpha1)
+    x = alpha1 * y + beta1
+
+    return (x, y)
+
+
+def compute_object_position(
+    player_x, player_y, flag_key, flag_dist, flag_angle, obj_dist, obj_angle
+):
+    EPS = 1e-9
+
+    x1, y1 = FLAGS[flag_key]
+
+    # Расстояние от объекта до флага
+    angle_diff = abs(flag_angle - obj_angle)
+    angle_diff_rad = math.radians(angle_diff)
+
+    d_obj_flag_sq = flag_dist**2 + obj_dist**2 - 2 * flag_dist * obj_dist * math.cos(angle_diff_rad)
+    if d_obj_flag_sq < 0:
+        d_obj_flag_sq = 0
+    d_obj_flag = math.sqrt(d_obj_flag_sq)
+
+    if d_obj_flag < EPS:
+        return (x1, y1)
+
+    # решаем систему:
+    # obj_dist^2 = (x - player_x)^2 + (y - player_y)^2
+    # d_obj_flag^2 = (x - x1)^2 + (y - y1)^2
+    solutions = _solve_two_circles(player_x, player_y, obj_dist, x1, y1, d_obj_flag)
+
+    if not solutions:
+        return None
+
+    valid = [
+        (sx, sy)
+        for sx, sy in solutions
+        if -FIELD_WIDTH <= sx <= FIELD_WIDTH and -FIELD_HEIGHT <= sy <= FIELD_HEIGHT
+    ]
+    if not valid:
+        valid = solutions
+
+    return valid[0]
+
+
+# ===== FILE: src/main.py =====
+
+import argparse
+import sys
+from controller import Controller
+
+from agent import Agent
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Labs")
+    parser.add_argument("--team", type=str, default="teamA")
+    parser.add_argument("--x", type=int, default=-15)
+    parser.add_argument("--y", type=int, default=0)
+    parser.add_argument("--goalie", action="store_true")
+    args = parser.parse_args()
+
+    actions = [
+        {"act": "flag", "fl": "frb"},
+        # {"act": "flag", "fl": "gl"},
+        # {"act": "flag", "fl": "fc"},
+        # {"act": "kick", "fl": "b", "goal": "gr"},
+    ]
+    controller = Controller(actions)
+
+    agent = Agent(
+        team_name=args.team,
+        is_goalie=args.goalie,
+        controller=controller,
+    )
+
+    try:
+        agent.run(start_pos=(args.x, args.y))
+    except KeyboardInterrupt:
+        agent.stop()
+    except Exception as e:
+        print(e)
+        agent.stop()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+
+
+# ===== FILE: src/controller.py =====
+
+
+class Controller:
+    def __init__(self, actions: list[dict] = None):
+        self.actions = actions or []
+        self.current_idx = 0
+
+    @property
+    def current_action(self) -> dict | None:
+        if not self.actions or self.current_idx >= len(self.actions):
+            return None
+        return self.actions[self.current_idx]
+
+    def next_action(self):
+        self.current_idx += 1
+        if self.current_idx >= len(self.actions):
+            self.current_idx = 0
+        print(f"переход к действию {self.current_idx}: {self.current_action}")
+
+    def reset(self):
+        self.current_idx = 0
+        print(f"Сброс контроллера. Текущее действие: {self.current_action}")
+
+    def decide(self, visible_objects: dict, game_on: bool) -> tuple[str, str] | None:
+        if not game_on:
+            return None
+
+        action = self.current_action
+        if action is None:
+            return None
+
+        act_type = action["act"]
+
+        if act_type == "flag":
+            return self._decide_move_to_flag(action, visible_objects)
+        elif act_type == "kick":
+            return self._decide_kick(action, visible_objects)
+
+        return None
+
+    def _decide_move_to_flag(self, action: dict, visible: dict) -> tuple[str, str]:
+        target = action["fl"]
+
+        # Если флаг не видно -> поворачиваемся
+        if target not in visible:
+            return ("turn", "60")
+
+        obj = visible[target]
+        dist = obj["dist"]
+        direction = obj["dir"]
+
+        if dist < 3.0:
+            self.next_action()
+            return self.decide(visible, True)
+
+        # Если флаг далеко -> поворачиваемся и бежим
+        if abs(direction) > 10:
+            return ("turn", str(int(direction)))
+        else:
+            return ("dash", "100")
+
+    def _decide_kick(self, action: dict, visible: dict) -> tuple[str, str]:
+        ball_key = action["fl"]
+        goal_key = action.get("goal", "gr")
+
+        # Если мяч не видно -> повернуться
+        if ball_key not in visible:
+            return ("turn", "60")
+
+        ball = visible[ball_key]
+        ball_dist = ball["dist"]
+        ball_dir = ball["dir"]
+
+        if ball_dist > 0.7:
+            # Если мяч далеко -> идем к нему
+            if abs(ball_dir) > 10:
+                return ("turn", str(int(ball_dir)))
+            else:
+                return ("dash", "100")
+
+        if goal_key in visible:
+            goal = visible[goal_key]
+            goal_dir = goal["dir"]
+            return ("kick", f"100 {int(goal_dir)}")
+        else:
+            # Если ворота не видны -> слабый удар вбок
+            return ("kick", "10 45")

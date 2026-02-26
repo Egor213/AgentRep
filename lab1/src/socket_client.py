@@ -1,5 +1,3 @@
-# ===== FILE: src/socket_client.py =====
-
 import socket
 
 

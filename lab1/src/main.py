@@ -5,14 +5,16 @@ from agent import Agent
 
 
 def main():
-    parser = argparse.ArgumentParser(description="RoboCup 2D agent")
-    parser.add_argument("--team", type=str, default="teamA", help="Имя команды")
-    parser.add_argument("--x", type=int, default=-15, help="Начальная координата X")
-    parser.add_argument("--y", type=int, default=0, help="Начальная координата Y")
+    parser = argparse.ArgumentParser(description="Labs")
+    parser.add_argument("--team", type=str, default="teamA")
+    parser.add_argument("--x", type=int, default=-15)
+    parser.add_argument("--y", type=int, default=0)
     parser.add_argument(
-        "--rotation", type=float, default=10, help="Скорость вращения (только для lab 1)"
+        "--rotation",
+        type=float,
+        default=10,
     )
-    parser.add_argument("--goalie", action="store_true", help="Регистрация как вратарь")
+    parser.add_argument("--goalie", action="store_true")
     args = parser.parse_args()
 
     rotation = args.rotation or 0.0
@@ -23,12 +25,11 @@ def main():
     )
 
     try:
-        agent.run(start_pos=(args.x, args.y), rotation_speed=rotation)
+        agent.run(start_pos=(args.x, args.y), rotation_angel=rotation)
     except KeyboardInterrupt:
-        print("\nПрерывание по Ctrl+C")
         agent.stop()
     except Exception as e:
-        print(f"Ошибка: {e}")
+        print(e)
         agent.stop()
         sys.exit(1)
 

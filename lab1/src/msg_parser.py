@@ -1,5 +1,3 @@
-# ===== FILE: src/msg_parser.py =====
-
 import re
 
 

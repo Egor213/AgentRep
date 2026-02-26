@@ -1,7 +1,4 @@
-# ===== FILE: src/agent.py =====
-
 import time
-import math
 from socket_client import SocketClient
 from flags import FLAGS, obj_name_to_key
 from msg_parser import MsgParser
@@ -25,10 +22,10 @@ class Agent:
         self.player_number = None
         self.game_mode = None
         self.socket = SocketClient()
-
+        self.play_on = False
         self.running = False
 
-        self.rotation_speed = 0.0
+        self.rotation_angel = 0.0
 
         self.x = None
         self.y = None
@@ -119,28 +116,39 @@ class Agent:
             self._process_see(parsed)
         elif msg_type == "hear":
             self._process_hear(parsed)
-        elif msg_type == "sense_body":
-            self._process_sense_body(parsed)
 
     def _process_hear(self, parsed: list):
-        pass
+        if len(parsed) < 4:
+            return
 
-    def _process_sense_body(self, parsed: list):
-        pass
+        time = parsed[1]
+        sender = parsed[2]
+        message = parsed[3] if len(parsed) > 3 else ""
+
+        if sender == "referee":
+            msg_str = str(message)
+            print(f"рефери говорит: {msg_str}")
+
+            if msg_str in ("play_on",):
+                self.play_on = True
+            elif msg_str.startswith("kick_off"):
+                self.play_on = False
+            elif msg_str.startswith("goal_"):
+                self.play_on = False
 
     def _process_see(self, parsed: list):
         """
-        ['see', 0, [['f', 'c'], 15, 0, 0, 0], [['f', 'r', 't'], 75.9, -27], 
-        [['f', 'r', 'b'], 75.9, 27], [['f', 'g', 'r', 'b'], 68, 6], 
-        [['g', 'r'], 67.4, 0], [['f', 'g', 'r', 't'], 68, -6], 
-        [['f', 'p', 'r', 'b'], 54.6, 22], [['f', 'p', 'r', 'c'], 50.9, 0], 
+        ['see', 0, [['f', 'c'], 15, 0, 0, 0], [['f', 'r', 't'], 75.9, -27],
+        [['f', 'r', 'b'], 75.9, 27], [['f', 'g', 'r', 'b'], 68, 6],
+        [['g', 'r'], 67.4, 0], [['f', 'g', 'r', 't'], 68, -6],
+        [['f', 'p', 'r', 'b'], 54.6, 22], [['f', 'p', 'r', 'c'], 50.9, 0],
         [['f', 'p', 'r', 't'], 54.6, -22], [['f', 't', 'r', 30], 59.7, -41],
-        [['f', 't', 'r', 40], 67.4, -35], [['f', 't', 'r', 50], 75.9, -31], 
-        [['f', 'b', 'r', 30], 59.7, 41], [['f', 'b', 'r', 40], 67.4, 35], 
-        [['f', 'b', 'r', 50], 75.9, 31], [['f', 'r', 0], 72.2, 0], 
-        [['f', 'r', 't', 10], 73, -8], [['f', 'r', 't', 20], 75.2, -15], 
-        [['f', 'r', 't', 30], 78.3, -22], [['f', 'r', 'b', 10], 73, 8], 
-        [['f', 'r', 'b', 20], 75.2, 15], [['f', 'r', 'b', 30], 78.3, 22], 
+        [['f', 't', 'r', 40], 67.4, -35], [['f', 't', 'r', 50], 75.9, -31],
+        [['f', 'b', 'r', 30], 59.7, 41], [['f', 'b', 'r', 40], 67.4, 35],
+        [['f', 'b', 'r', 50], 75.9, 31], [['f', 'r', 0], 72.2, 0],
+        [['f', 'r', 't', 10], 73, -8], [['f', 'r', 't', 20], 75.2, -15],
+        [['f', 'r', 't', 30], 78.3, -22], [['f', 'r', 'b', 10], 73, 8],
+        [['f', 'r', 'b', 20], 75.2, 15], [['f', 'r', 'b', 30], 78.3, 22],
         [['b'], 14.9, 0, 0, 0], [['l', 'r'], 67.4, 90]]
         """
         if len(parsed) < 2:
@@ -154,17 +162,15 @@ class Agent:
             if not isinstance(obj_info, list) or len(obj_info) < 2:
                 continue
 
-            obj_name_raw = obj_info[0] 
-            params = obj_info[1:] 
+            obj_name_raw = obj_info[0]
+            params = obj_info[1:]
 
             if not isinstance(obj_name_raw, list):
                 continue
 
             key = obj_name_to_key(obj_name_raw)
-            entry = {"name": obj_name_raw}
+            entry = {"name": obj_name_raw, "dist": float(params[0])}
 
-            if len(params) >= 1:
-                entry["dist"] = float(params[0])
             if len(params) >= 2:
                 entry["dir"] = float(params[1])
             if len(params) >= 3:
@@ -182,17 +188,14 @@ class Agent:
 
         self._compute_objects_positions()
 
-
     def _compute_my_position(self):
         flag_observations = []
         for key, obj in self.visible_objects.items():
-            if key in FLAGS and "dist" in obj:
+            if key in FLAGS:
                 flag_observations.append((key, obj["dist"]))
 
         if len(flag_observations) < 2:
             return
-
-        flag_observations.sort(key=lambda fo: fo[1])
 
         f1_key, d1 = flag_observations[0]
         f2_key, d2 = flag_observations[1]
@@ -201,14 +204,13 @@ class Agent:
             f3_key, d3 = flag_observations[2]
             pos = compute_position_three_flags(f1_key, d1, f2_key, d2, f3_key, d3)
             if pos is None:
-                pos = compute_position_two_flags(f1_key, d1, f2_key, d2, f3_key, d3)
+                pos = compute_position_two_flags(f1_key, d1, f2_key, d2)
         else:
             pos = compute_position_two_flags(f1_key, d1, f2_key, d2)
 
         if pos:
             self.x, self.y = pos
-            print(f"[Position] x={self.x:.2f}, y={self.y:.2f}")
-
+            print(f"Позиция игрока x={self.x:.2f}, y={self.y:.2f}")
 
     def _compute_objects_positions(self):
         if self.x is None or self.y is None:
@@ -216,7 +218,7 @@ class Agent:
 
         flag_for_ref = None
         for key, obj in self.visible_objects.items():
-            if key in FLAGS and "dist" in obj and "dir" in obj:
+            if key in FLAGS and "dir" in obj:
                 flag_for_ref = (key, obj["dist"], obj["dir"])
                 break
 
@@ -224,19 +226,16 @@ class Agent:
             return
 
         fk, fd, fa = flag_for_ref
-
         for key, obj in self.visible_objects.items():
-            if key in FLAGS:
+            if key in FLAGS or "dir" not in obj:
                 continue
-            if "dist" not in obj or "dir" not in obj:
-                continue
-
             obj_dist = obj["dist"]
             obj_dir = obj["dir"]
 
             pos = compute_object_position(self.x, self.y, fk, fd, fa, obj_dist, obj_dir)
 
             if pos:
+                # Сохраним на будущее
                 obj["computed_x"] = pos[0]
                 obj["computed_y"] = pos[1]
                 name_parts = obj.get("name", [])
@@ -244,25 +243,27 @@ class Agent:
                 if name_parts and name_parts[0] == "p":
                     team = name_parts[1] if len(name_parts) > 1 else "?"
                     num = name_parts[2] if len(name_parts) > 2 else "?"
-                    print(f"[Object] Игрок {team}#{num}: x={pos[0]:.2f}, y={pos[1]:.2f}")
+                    print(f"Игрок {team}#{num}: x={pos[0]:.2f}, y={pos[1]:.2f}")
                 elif name_parts and name_parts[0] == "b":
-                    print(f"[Object] Мяч: x={pos[0]:.2f}, y={pos[1]:.2f}")
+                    print(f"Мяч: x={pos[0]:.2f}, y={pos[1]:.2f}")
 
-    def run(self, start_pos: tuple[int, int], rotation_speed: float = 0):
+    def run(self, start_pos: tuple[int, int], rotation_angel: float = 0):
         self.connect()
         self.move(*start_pos)
-        self.rotation_speed = rotation_speed
+        self.rotation_angel = rotation_angel
         self.running = True
 
         print(
-            f"Агент запущен. Команда: {self.team}, номер: {self.player_number}, сторона: {self.side}"
+            f"Команда: {self.team}, номер: {self.player_number}, сторона: {self.side}, начальная позиция: {start_pos}, скорость вращения: {rotation_angel}"
         )
-        print(f"Начальная позиция: {start_pos}, скорость вращения: {rotation_speed}")
 
         while self.running:
             data = self.socket.receive()
             if data:
                 self.process_message(data)
+
+            # if self.play_on:
+            self.turn(self.rotation_angel)
 
     def stop(self):
         self.running = False

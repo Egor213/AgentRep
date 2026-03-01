@@ -34,6 +34,11 @@ class DTManager:
         if obj_key in self.visible:
             return self.visible[obj_key].get("dist", 9999)
         return 9999
+    
+    def getDistChange(self, obj_key: str) -> float:
+        if obj_key in self.visible:
+            return self.visible[obj_key].get("dist_change", 0)
+        return 0
 
     def getAngle(self, obj_key: str) -> float:
         if obj_key in self.visible:

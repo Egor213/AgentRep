@@ -27,16 +27,23 @@ def create_goalie_tree():
 
         # Мяч близко?
         "checkBallClose": {
-            "condition": lambda mgr, state: state["ball_dist"] < 15,
+            "condition": lambda mgr, state: state["ball_dist"] < 20,
             "trueCond": "ballCloseLogic",
             "falseCond": "goToGoal",
         },
 
         # Если сильно ли близко мяч?
         "ballCloseLogic": {
-            "condition": lambda mgr, state: state["ball_dist"] < 2,
-            "trueCond": "tryCatch",
+            "condition": lambda mgr, state: state["ball_dist"] < 1.5,
+            "trueCond": "checkDistChange",
             "falseCond": "checkBallKickable",
+        },
+
+        # Решить пинать или ловить
+        "checkDistChange": {
+            "condition": lambda mgr, state: state["ball_dist_change"] < 2,
+            "trueCond": "checkBallKickable",
+            "falseCond": "tryCatch",
         },
         
         # Пытаемся поймать мяч
@@ -109,7 +116,7 @@ def create_goalie_tree():
 
         # Бежим к мячу
         "dashToBall": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("dash", "80")),
+            "exec": lambda mgr, state: state.__setitem__("command", ("dash", "100")),
             "next": "sendCommand",
         },
         
@@ -191,6 +198,7 @@ def create_goalie_tree():
 
 def _update_ball_info(mgr, state):
     state["ball_dist"] = mgr.getDistance("b")
+    state["ball_dist_change"] = mgr.getDistChange("b")
     state["ball_angle"] = mgr.getAngle("b")
 
 

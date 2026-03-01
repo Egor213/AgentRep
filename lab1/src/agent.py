@@ -235,9 +235,6 @@ class Agent:
             pos = compute_object_position(self.x, self.y, fk, fd, fa, obj_dist, obj_dir)
 
             if pos:
-                # Сохраним на будущее
-                obj["computed_x"] = pos[0]
-                obj["computed_y"] = pos[1]
                 name_parts = obj.get("name", [])
 
                 if name_parts and name_parts[0] == "p":
@@ -262,8 +259,8 @@ class Agent:
             if data:
                 self.process_message(data)
 
-            # if self.play_on:
-            self.turn(self.rotation_angel)
+            if self.play_on:
+                self.turn(self.rotation_angel)
 
     def stop(self):
         self.running = False

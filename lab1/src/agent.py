@@ -184,9 +184,12 @@ class Agent:
 
             self.visible_objects[key] = entry
 
-        self._compute_my_position()
+        res = self._compute_my_position()
+        if res is None:
+            return
 
         self._compute_objects_positions()
+
 
     def _compute_my_position(self):
         flag_observations = []
@@ -208,9 +211,16 @@ class Agent:
         else:
             pos = compute_position_two_flags(f1_key, d1, f2_key, d2)
 
+        if pos is None or len(pos) > 1:
+            return 
+        else:
+            pos = pos[0]
+
         if pos:
             self.x, self.y = pos
             print(f"Позиция игрока x={self.x:.2f}, y={self.y:.2f}")
+            return 1
+        return 1
 
     def _compute_objects_positions(self):
         if self.x is None or self.y is None:

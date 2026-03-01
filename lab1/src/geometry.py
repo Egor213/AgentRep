@@ -39,8 +39,8 @@ def _solve_two_circles(x1, y1, d1, x2, y2, d2):
         return []
 
     if abs(x2 - x1) < EPS:
-        y = (y2 ** 2 - y1 ** 2 + d1 ** 2 - d2 ** 2) / (2 * (y2 - y1))
-        det = d1 ** 2 - (y - y1) ** 2
+        y = (y2**2 - y1**2 + d1**2 - d2**2) / (2 * (y2 - y1))
+        det = d1**2 - (y - y1) ** 2
         if det < 0:
             return []
         det = max(det, 0)
@@ -50,8 +50,8 @@ def _solve_two_circles(x1, y1, d1, x2, y2, d2):
         return solutions
 
     if abs(y2 - y1) < EPS:
-        x = (x2 ** 2 - x1 ** 2 + d1 ** 2 - d2 ** 2) / (2 * (x2 - x1))
-        det = d1 ** 2 - (x - x1) ** 2
+        x = (x2**2 - x1**2 + d1**2 - d2**2) / (2 * (x2 - x1))
+        det = d1**2 - (x - x1) ** 2
         if det < 0:
             return []
         det = max(det, 0)

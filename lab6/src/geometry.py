@@ -1,8 +1,8 @@
 import math
 from flags import FLAGS
 
-FIELD_WIDTH = 55
-FIELD_HEIGHT = 35
+FIELD_WIDTH = 54
+FIELD_HEIGHT = 32
 
 
 def compute_position_two_flags(
@@ -27,7 +27,7 @@ def compute_position_two_flags(
     if not valid:
         valid = solutions
 
-    return valid
+    return valid[0]
 
 
 def _solve_two_circles(x1, y1, d1, x2, y2, d2):
@@ -99,22 +99,25 @@ def compute_position_three_flags(
     x2, y2 = FLAGS[flag2_key]
     x3, y3 = FLAGS[flag3_key]
 
-    EPS = 1e-9
+    # Линейная система:
+    # 2x(x2 - x1) + 2y(y2 - y1) = d1^2 - d2^2 - x1^2 + x2^2 - y1^2 + y2^2
+    # 2x(x3 - x1) + 2y(y3 - y1) = d1^2 - d3^2 - x1^2 + x3^2 - y1^2 + y3^2
 
-    if abs(x2 - x1) < EPS or abs(x3 - x1) < EPS:
+    a1 = 2 * (x2 - x1)
+    b1 = 2 * (y2 - y1)
+    c1 = d1**2 - d2**2 - x1**2 + x2**2 - y1**2 + y2**2
+
+    a2 = 2 * (x3 - x1)
+    b2 = 2 * (y3 - y1)
+    c2 = d1**2 - d3**2 - x1**2 + x3**2 - y1**2 + y3**2
+
+    det = a1 * b2 - a2 * b1
+
+    if abs(det) < 1e-6:
         return compute_position_two_flags(flag1_key, d1, flag2_key, d2)
 
-    alpha1 = (y1 - y2) / (x2 - x1)
-    beta1 = (y2**2 - y1**2 + x2**2 - x1**2 + d1**2 - d2**2) / (2 * (x2 - x1))
-
-    alpha2 = (y1 - y3) / (x3 - x1)
-    beta2 = (y3**2 - y1**2 + x3**2 - x1**2 + d1**2 - d3**2) / (2 * (x3 - x1))
-
-    if abs(alpha2 - alpha1) < EPS:
-        return compute_position_two_flags(flag1_key, d1, flag2_key, d2)
-
-    y = (beta1 - beta2) / (alpha2 - alpha1)
-    x = alpha1 * y + beta1
+    x = (c1 * b2 - c2 * b1) / det
+    y = (a1 * c2 - a2 * c1) / det
 
     return (x, y)
 

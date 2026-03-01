@@ -108,10 +108,10 @@ def compute_position_three_flags(
     alpha2 = (y1 - y3) / (x3 - x1)
     beta2 = (y3**2 - y1**2 + x3**2 - x1**2 + d1**2 - d3**2) / (2 * (x3 - x1))
 
-    try:
-        y = (beta1 - beta2) / (alpha2 - alpha1)
-    except ZeroDivisionError:
+    if abs(alpha2 - alpha1) < EPS:
         return compute_position_two_flags(flag1_key, d1, flag2_key, d2)
+
+    y = (beta1 - beta2) / (alpha2 - alpha1)
     x = alpha1 * y + beta1
 
     return (x, y)

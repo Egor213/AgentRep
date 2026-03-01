@@ -1,0 +1,10 @@
+src/agent.py
+src/attacker_ta.py
+src/flags.py
+src/geometry.py
+src/goalie_ta.py
+src/main.py
+src/msg_parser.py
+src/socket_client.py
+src/ta_manager.py
+src/taken.py

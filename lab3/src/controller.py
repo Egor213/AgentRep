@@ -1,5 +1,3 @@
-# ===== FILE: src/controller.py =====
-
 from decision_tree import DecisionTree
 from dt_manager import DTManager
 from player_dt import create_player_tree
@@ -14,27 +12,28 @@ class Controller:
         if is_goalie:
             tree_dict = create_goalie_tree()
         else:
-            actions = actions or [
-                {"act": "flag", "fl": "frb"},
-                {"act": "kick", "fl": "b", "goal": "gr"},
-            ]
             tree_dict = create_player_tree(actions)
 
         self.dt = DecisionTree(tree_dict)
 
     def reset(self):
-        """Сброс после гола."""
         state = self.dt.state
         if "next" in state:
             state["next"] = 0
             if "sequence" in state:
                 state["action"] = state["sequence"][0]
         state["command"] = None
-        print("Контроллер сброшен")
 
-    def decide(self, visible_objects: dict, game_on: bool,
-               team: str = "", side: str = "", player_number: int = 0,
-               x=None, y=None) -> tuple[str, str] | None:
+    def decide(
+        self,
+        visible_objects: dict,
+        game_on: bool,
+        team: str = "",
+        side: str = "",
+        player_number: int = 0,
+        x=None,
+        y=None,
+    ) -> tuple[str, str] | None:
         if not game_on:
             return None
 

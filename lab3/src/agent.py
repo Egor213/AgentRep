@@ -1,5 +1,3 @@
-# ===== FILE: src/agent.py =====
-
 import time
 from socket_client import SocketClient
 from flags import FLAGS, obj_name_to_key
@@ -7,7 +5,6 @@ from msg_parser import MsgParser
 from geometry import (
     compute_position_two_flags,
     compute_position_three_flags,
-    compute_object_position,
 )
 from controller import Controller
 
@@ -17,7 +14,7 @@ class InitError(Exception):
 
 
 class Agent:
-    def __init__(self, team_name, controller, version=7, is_goalie=False):
+    def __init__(self, team_name, controller: Controller, version=7, is_goalie=False):
         self.team = team_name
         self.version = version
         self.is_goalie = is_goalie
@@ -57,24 +54,6 @@ class Agent:
 
     def move(self, x, y):
         self.socket.send(f"(move {x} {y})")
-
-    def turn(self, moment):
-        self.socket.send(f"(turn {moment})")
-
-    def dash(self, power):
-        self.socket.send(f"(dash {power})")
-
-    def kick(self, power, direction):
-        self.socket.send(f"(kick {power} {direction})")
-
-    def catch_ball(self, direction):
-        self.socket.send(f"(catch {direction})")
-
-    def say(self, msg):
-        self.socket.send(f"(say {msg})")
-
-    def turn_neck(self, angle):
-        self.socket.send(f"(turn_neck {angle})")
 
     def _send_command(self, cmd: str, params: str):
         self.socket.send(f"({cmd} {params})")
@@ -136,13 +115,15 @@ class Agent:
             self.visible_objects[key] = entry
 
         self._compute_my_position()
-        self._compute_objects_positions()
 
         decision = self.controller.decide(
-            self.visible_objects, self.play_on,
-            team=self.team, side=self.side or "",
+            self.visible_objects,
+            self.play_on,
+            team=self.team,
+            side=self.side or "",
             player_number=self.player_number or 0,
-            x=self.x, y=self.y,
+            x=self.x,
+            y=self.y,
         )
         if decision:
             cmd, params = decision
@@ -169,26 +150,6 @@ class Agent:
 
         if pos:
             self.x, self.y = pos
-
-    def _compute_objects_positions(self):
-        if self.x is None or self.y is None:
-            return
-        flag_for_ref = None
-        for key, obj in self.visible_objects.items():
-            if key in FLAGS and "dir" in obj:
-                flag_for_ref = (key, obj["dist"], obj["dir"])
-                break
-        if flag_for_ref is None:
-            return
-
-        fk, fd, fa = flag_for_ref
-        for key, obj in self.visible_objects.items():
-            if key in FLAGS or "dir" not in obj:
-                continue
-            pos = compute_object_position(self.x, self.y, fk, fd, fa, obj["dist"], obj["dir"])
-            if pos:
-                obj["computed_x"] = pos[0]
-                obj["computed_y"] = pos[1]
 
     def run(self, start_pos: tuple[int, int]):
         self.connect()

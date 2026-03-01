@@ -39,8 +39,8 @@ def _solve_two_circles(x1, y1, d1, x2, y2, d2):
         return []
 
     if abs(x2 - x1) < EPS:
-        y = (y2 ** 2 - y1 ** 2 + d1 ** 2 - d2 ** 2) / (2 * (y2 - y1))
-        det = d1 ** 2 - (y - y1) ** 2
+        y = (y2**2 - y1**2 + d1**2 - d2**2) / (2 * (y2 - y1))
+        det = d1**2 - (y - y1) ** 2
         if det < 0:
             return []
         det = max(det, 0)
@@ -50,8 +50,8 @@ def _solve_two_circles(x1, y1, d1, x2, y2, d2):
         return solutions
 
     if abs(y2 - y1) < EPS:
-        x = (x2 ** 2 - x1 ** 2 + d1 ** 2 - d2 ** 2) / (2 * (x2 - x1))
-        det = d1 ** 2 - (x - x1) ** 2
+        x = (x2**2 - x1**2 + d1**2 - d2**2) / (2 * (x2 - x1))
+        det = d1**2 - (x - x1) ** 2
         if det < 0:
             return []
         det = max(det, 0)
@@ -115,41 +115,3 @@ def compute_position_three_flags(
     x = alpha1 * y + beta1
 
     return (x, y)
-
-
-def compute_object_position(
-    player_x, player_y, flag_key, flag_dist, flag_angle, obj_dist, obj_angle
-):
-    EPS = 1e-9
-
-    x1, y1 = FLAGS[flag_key]
-
-    # Расстояние от объекта до флага
-    angle_diff = abs(flag_angle - obj_angle)
-    angle_diff_rad = math.radians(angle_diff)
-
-    d_obj_flag_sq = flag_dist**2 + obj_dist**2 - 2 * flag_dist * obj_dist * math.cos(angle_diff_rad)
-    if d_obj_flag_sq < 0:
-        d_obj_flag_sq = 0
-    d_obj_flag = math.sqrt(d_obj_flag_sq)
-
-    if d_obj_flag < EPS:
-        return (x1, y1)
-
-    # решаем систему:
-    # obj_dist^2 = (x - player_x)^2 + (y - player_y)^2
-    # d_obj_flag^2 = (x - x1)^2 + (y - y1)^2
-    solutions = _solve_two_circles(player_x, player_y, obj_dist, x1, y1, d_obj_flag)
-
-    if not solutions:
-        return None
-
-    valid = [
-        (sx, sy)
-        for sx, sy in solutions
-        if -FIELD_WIDTH <= sx <= FIELD_WIDTH and -FIELD_HEIGHT <= sy <= FIELD_HEIGHT
-    ]
-    if not valid:
-        valid = solutions
-
-    return valid[0]

@@ -1,4 +1,3 @@
-
 class DecisionTree:
     """
     Дерево решений состоит из узлов 3 видов:
@@ -8,7 +7,6 @@ class DecisionTree:
     """
 
     def __init__(self, tree: dict):
-        self.tree_cop = tree.copy()
         self.tree = tree
 
     @property
@@ -16,7 +14,6 @@ class DecisionTree:
         return self.tree["state"]
 
     def execute(self, mgr):
-        self.tree = self.tree_cop.copy()
         return self._run(mgr, "root")
 
     def _run(self, mgr, node_name: str):

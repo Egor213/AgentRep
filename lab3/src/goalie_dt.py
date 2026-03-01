@@ -1,5 +1,3 @@
-
-
 def create_goalie_tree():
     tree = {
         "state": {
@@ -8,38 +6,40 @@ def create_goalie_tree():
             "ball_angle": 0,
         },
 
-        # ==================== root ====================
+        # root
         "root": {
             "exec": lambda mgr, state: state.__setitem__("command", None),
             "next": "checkBallVisible",
         },
 
-        # ========== Виден ли мяч? ==========
+        # Видно ли мяч?
         "checkBallVisible": {
             "condition": lambda mgr, state: mgr.getVisible("b"),
             "trueCond": "updateBallInfo",
             "falseCond": "goToGoal",
         },
 
+        # Обновляем информацию о мяче
         "updateBallInfo": {
             "exec": lambda mgr, state: _update_ball_info(mgr, state),
             "next": "checkBallClose",
         },
 
-        # ========== Мяч близко? (< 15) ==========
+        # Мяч близко?
         "checkBallClose": {
             "condition": lambda mgr, state: state["ball_dist"] < 15,
             "trueCond": "ballCloseLogic",
             "falseCond": "goToGoal",
         },
 
-        # ========== Логика близкого мяча ==========
+        # Если сильно ли близко мяч?
         "ballCloseLogic": {
             "condition": lambda mgr, state: state["ball_dist"] < 2,
-            "trueCond": "checkBallKickable",
+            "trueCond": "tryCatch",
             "falseCond": "checkBallKickable",
         },
-
+        
+        # Пытаемся поймать мяч
         "tryCatch": {
             "exec": lambda mgr, state: state.__setitem__(
                 "command", ("catch", str(int(state["ball_angle"])))
@@ -47,64 +47,59 @@ def create_goalie_tree():
             "next": "sendCommand",
         },
 
+        # Если мяч внезапно прилетел, то пинаем
         "checkBallKickable": {
             "condition": lambda mgr, state: state["ball_dist"] < 0.7,
             "trueCond": "kickBall",
             "falseCond": "approachBall",
         },
 
-        # --- Удар от ворот ---
         "kickBall": {
             "condition": lambda mgr, state: mgr.getVisible("gl"),
             "trueCond": "kickToGl",
             "falseCond": "kickToFltOrFlb",
         },
-
         "kickToGl": {
             "exec": lambda mgr, state: state.__setitem__(
                 "command", ("kick", f"100 {int(mgr.getAngle('gl'))}")
             ),
             "next": "sendCommand",
         },
-
         "kickToFltOrFlb": {
             "condition": lambda mgr, state: mgr.getVisible("flt"),
             "trueCond": "kickToFlt",
             "falseCond": "kickToFlbOrWeak",
         },
-
         "kickToFlt": {
             "exec": lambda mgr, state: state.__setitem__(
                 "command", ("kick", f"80 {int(mgr.getAngle('flt'))}")
             ),
             "next": "sendCommand",
         },
-
         "kickToFlbOrWeak": {
             "condition": lambda mgr, state: mgr.getVisible("flb"),
             "trueCond": "kickToFlb",
             "falseCond": "kickWeak",
         },
-
         "kickToFlb": {
             "exec": lambda mgr, state: state.__setitem__(
                 "command", ("kick", f"80 {int(mgr.getAngle('flb'))}")
             ),
             "next": "sendCommand",
         },
-
         "kickWeak": {
             "exec": lambda mgr, state: state.__setitem__("command", ("kick", "30 90")),
             "next": "sendCommand",
         },
-
-        # --- Приблизиться к мячу ---
+        
+        # Проверяем угол мяча, нужно ли повернуться
         "approachBall": {
             "condition": lambda mgr, state: abs(state["ball_angle"]) > 5,
             "trueCond": "turnToBall",
             "falseCond": "dashToBall",
         },
 
+        # Поворачиваемся
         "turnToBall": {
             "exec": lambda mgr, state: state.__setitem__(
                 "command", ("turn", str(int(state["ball_angle"])))
@@ -112,92 +107,81 @@ def create_goalie_tree():
             "next": "sendCommand",
         },
 
+        # Бежим к мячу
         "dashToBall": {
             "exec": lambda mgr, state: state.__setitem__("command", ("dash", "80")),
             "next": "sendCommand",
         },
+        
 
-        # ==========================================================
-        #  Возврат к воротам
-        # ==========================================================
+        # ВОЗВРАТ К ВОРОТАМ
         "goToGoal": {
             "condition": lambda mgr, state: mgr.getVisible("gr"),
             "trueCond": "checkGoalDist",
             "falseCond": "searchGoal",
         },
-
         "searchGoal": {
             "exec": lambda mgr, state: state.__setitem__("command", ("turn", "60")),
             "next": "sendCommand",
         },
-
         "checkGoalDist": {
             "condition": lambda mgr, state: mgr.getDistance("gr") > 5,
             "trueCond": "moveToGoal",
             "falseCond": "positionInGoal",
         },
-
         "moveToGoal": {
             "condition": lambda mgr, state: abs(mgr.getAngle("gr")) > 5,
             "trueCond": "turnToGoal",
             "falseCond": "dashToGoal",
         },
-
         "turnToGoal": {
             "exec": lambda mgr, state: state.__setitem__(
                 "command", ("turn", str(int(mgr.getAngle("gr"))))
             ),
             "next": "sendCommand",
         },
-
         "dashToGoal": {
             "exec": lambda mgr, state: state.__setitem__("command", ("dash", "80")),
             "next": "sendCommand",
         },
 
-        # --- Позиционирование в воротах ---
+        # ПОстановка в воротах
         "positionInGoal": {
             "condition": lambda mgr, state: _need_adjustment(mgr),
             "trueCond": "adjustPosition",
             "falseCond": "faceBall",
         },
-
         "adjustPosition": {
             "exec": lambda mgr, state: _adjust_position(mgr, state),
             "next": "sendCommand",
         },
-
-        # --- Смотреть на мяч ---
+        # Бросаем взгляд на мяч
         "faceBall": {
             "condition": lambda mgr, state: mgr.getVisible("b"),
             "trueCond": "faceBallCheck",
             "falseCond": "faceBallSearch",
         },
-
         "faceBallCheck": {
             "condition": lambda mgr, state: abs(mgr.getAngle("b")) > 5,
             "trueCond": "turnFaceBall",
             "falseCond": "standStill",
         },
-
         "turnFaceBall": {
             "exec": lambda mgr, state: state.__setitem__(
                 "command", ("turn", str(int(mgr.getAngle("b"))))
             ),
             "next": "sendCommand",
         },
-
         "faceBallSearch": {
             "exec": lambda mgr, state: state.__setitem__("command", ("turn", "30")),
             "next": "sendCommand",
         },
-
         "standStill": {
             "exec": lambda mgr, state: state.__setitem__("command", ("turn", "1")),
             "next": "sendCommand",
         },
 
-        # ========== Отправка команды ==========
+
         "sendCommand": {
             "command": lambda mgr, state: state["command"],
         },
@@ -211,7 +195,6 @@ def _update_ball_info(mgr, state):
 
 
 def _need_adjustment(mgr):
-    """Нужна ли корректировка позиции в воротах (по fprc)."""
     if mgr.getVisible("fprc"):
         d = mgr.getDistance("fprc")
         if d < 10 or d > 18:
@@ -222,7 +205,6 @@ def _need_adjustment(mgr):
 
 
 def _adjust_position(mgr, state):
-    """Корректировка позиции вратаря."""
     if mgr.getVisible("fprc"):
         d = mgr.getDistance("fprc")
         angle = mgr.getAngle("fprc")

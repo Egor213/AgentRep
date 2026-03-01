@@ -1,4 +1,3 @@
-
 class DTManager:
     """
     Предоставляет интерфейс для рутинных задач
@@ -12,8 +11,15 @@ class DTManager:
         self.x = None
         self.y = None
 
-    def update(self, visible_objects: dict, team: str = "", side: str = "",
-               player_number: int = 0, x=None, y=None):
+    def update(
+        self,
+        visible_objects: dict,
+        team: str = "",
+        side: str = "",
+        player_number: int = 0,
+        x=None,
+        y=None,
+    ):
         self.visible = visible_objects
         self.team = team
         self.side = side

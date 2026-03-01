@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 from controller import Controller
 
@@ -11,16 +12,16 @@ def main():
     parser.add_argument("--x", type=int, default=-15)
     parser.add_argument("--y", type=int, default=0)
     parser.add_argument("--goalie", action="store_true")
+    parser.add_argument('--actions', type=str)
     args = parser.parse_args()
 
-    # actions = [
-    #     {"act": "flag", "fl": "frb"},
-    #     # {"act": "flag", "fl": "gl"},
-    #     # {"act": "flag", "fl": "fc"}, float division by zero словил)))
-    #     {"act": "kick", "fl": "b", "goal": "gr"},
-    # ]
+    if args.actions:
+        actions = json.loads(args.actions)
+    else:
+        actions = []
+
     controller = Controller(
-        # actions,
+        actions,
         is_goalie=args.goalie
     )
 

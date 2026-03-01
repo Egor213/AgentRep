@@ -1,5 +1,3 @@
-# ===== FILE: src/flags.py =====
-
 import math
 
 FLAGS = {

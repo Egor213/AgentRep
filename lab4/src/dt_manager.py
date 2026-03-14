@@ -30,6 +30,22 @@ class DTManager:
         self.y = y
         self.last_heard_msg = last_heard_msg
 
+    def getGoalFlag(self) -> str:
+        """Возвращает флаг ворот, которые нужно атаковать"""
+        return "gr" if self.side == "l" else "gl"
+
+    def getCenterFlag(self) -> str:
+        """Возвращает центральный флаг на своей половине поля"""
+        return "fplc" if self.side == "l" else "fprc"
+
+    def getCornerFlag(self) -> str:
+        """Возвращает угловой флаг на своей половине поля (верхний)"""
+        return "fplb" if self.side == "l" else "fprb"
+
+    def getGoalCornerFlag(self) -> str:
+        """Возвращает флаг у чужих ворот (для скоринга)"""
+        return "fgrb" if self.side == "l" else "fglt"
+
     def getVisible(self, obj_key: str) -> bool:
         return obj_key in self.visible
 

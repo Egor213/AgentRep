@@ -28,12 +28,12 @@ def create_scorer_tree():
             "falseCond": "checkMoveToFgrb",
         },
         "atFplb": {
-            "condition": lambda mgr, state: mgr.getDistance("fplb") < 3,
+            "condition": lambda mgr, state: mgr.getDistance(mgr.getCornerFlag()) < 3,
             "trueCond": "startMoveToFgrb",
             "falseCond": "goToFplb",
         },
         "goToFplb": {
-            "condition": lambda mgr, state: mgr.getVisible("fplb"),
+            "condition": lambda mgr, state: mgr.getVisible(mgr.getCornerFlag()),
             "trueCond": "approachFplb",
             "falseCond": "searchFplb",
         },
@@ -42,12 +42,12 @@ def create_scorer_tree():
             "next": "sendCommand",
         },
         "approachFplb": {
-            "condition": lambda mgr, state: abs(mgr.getAngle("fplb")) > 5,
+            "condition": lambda mgr, state: abs(mgr.getAngle(mgr.getCornerFlag())) > 5,
             "trueCond": "turnToFplb",
             "falseCond": "dashToFplb",
         },
         "turnToFplb": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", str(int(mgr.getAngle("fplb"))))),
+            "exec": lambda mgr, state: state.__setitem__("command", ("turn", str(int(mgr.getAngle(mgr.getCornerFlag()))))),
             "next": "sendCommand",
         },
         "dashToFplb": {
@@ -64,12 +64,12 @@ def create_scorer_tree():
             "falseCond": "checkWaitPass",
         },
         "atFgrb": {
-            "condition": lambda mgr, state: mgr.getDistance("fgrb") < 3,
+            "condition": lambda mgr, state: mgr.getDistance(mgr.getGoalCornerFlag()) < 3,
             "trueCond": "startWaitPass",
             "falseCond": "goToFgrb",
         },
         "goToFgrb": {
-            "condition": lambda mgr, state: mgr.getVisible("fgrb"),
+            "condition": lambda mgr, state: mgr.getVisible(mgr.getGoalCornerFlag()),
             "trueCond": "approachFgrb",
             "falseCond": "searchFgrb",
         },
@@ -78,12 +78,12 @@ def create_scorer_tree():
             "next": "sendCommand",
         },
         "approachFgrb": {
-            "condition": lambda mgr, state: abs(mgr.getAngle("fgrb")) > 5,
+            "condition": lambda mgr, state: abs(mgr.getAngle(mgr.getGoalCornerFlag())) > 5,
             "trueCond": "turnToFgrb",
             "falseCond": "dashToFgrb",
         },
         "turnToFgrb": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", str(int(mgr.getAngle("fgrb"))))),
+            "exec": lambda mgr, state: state.__setitem__("command", ("turn", str(int(mgr.getAngle(mgr.getGoalCornerFlag()))))),
             "next": "sendCommand",
         },
         "dashToFgrb": {
@@ -141,12 +141,12 @@ def create_scorer_tree():
             "next": "sendCommand",
         },
         "kickToGoal": {
-            "condition": lambda mgr, state: mgr.getVisible("gr"),
+            "condition": lambda mgr, state: mgr.getVisible(mgr.getGoalFlag()),
             "trueCond": "goalVisibleScore",
             "falseCond": "goalInvisibleScore",
         },
         "goalVisibleScore": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("kick", f"100 {int(mgr.getAngle('gr'))}")),
+            "exec": lambda mgr, state: state.__setitem__("command", ("kick", f"100 {int(mgr.getAngle(mgr.getGoalFlag()))}")),
             "next": "sendCommand",
         },
         "goalInvisibleScore": {

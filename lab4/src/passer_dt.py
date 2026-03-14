@@ -23,12 +23,12 @@ def create_passer_tree():
             "falseCond": "checkMoveToBall",
         },
         "atFplc": {
-            "condition": lambda mgr, state: mgr.getDistance("fplc") < 3,
+            "condition": lambda mgr, state: mgr.getDistance(mgr.getCenterFlag()) < 3,
             "trueCond": "startMoveToBall",
             "falseCond": "goToFplc",
         },
         "goToFplc": {
-            "condition": lambda mgr, state: mgr.getVisible("fplc"),
+            "condition": lambda mgr, state: mgr.getVisible(mgr.getCenterFlag()),
             "trueCond": "approachFplc",
             "falseCond": "searchFplc",
         },
@@ -37,12 +37,12 @@ def create_passer_tree():
             "next": "sendCommand",
         },
         "approachFplc": {
-            "condition": lambda mgr, state: abs(mgr.getAngle("fplc")) > 5,
+            "condition": lambda mgr, state: abs(mgr.getAngle(mgr.getCenterFlag())) > 5,
             "trueCond": "turnToFplc",
             "falseCond": "dashToFplc",
         },
         "turnToFplc": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", str(int(mgr.getAngle("fplc"))))),
+            "exec": lambda mgr, state: state.__setitem__("command", ("turn", str(int(mgr.getAngle(mgr.getCenterFlag()))))),
             "next": "sendCommand",
         },
         "dashToFplc": {

@@ -104,6 +104,10 @@ class CtrlLow(HierarchicalController):
                 result["i_am_closest_to_ball"] = False
 
     def _find_best_pass_target(self, result):
+        """
+        Выбирает лучшего тиммейта для паса.
+        ЖЁСТКО отсекает тиммейтов в направлении своих ворот.
+        """
         teammates = result["teammates"]
         if not teammates:
             return
@@ -122,8 +126,19 @@ class CtrlLow(HierarchicalController):
             if t_dist > 35 or t_dist < 3:
                 continue
 
+            # === ЖЁСТКАЯ ПРОВЕРКА: тиммейт в направлении своих ворот — ПРОПУСТИТЬ ===
+            if goal_own:
+                own_dir = goal_own.get("dir", 0)
+                diff_to_own = abs(t_dir - own_dir)
+                if diff_to_own > 180:
+                    diff_to_own = 360 - diff_to_own
+                # Если тиммейт в секторе ±60° от направления своих ворот — НЕ пасовать
+                if diff_to_own < 60:
+                    continue
+
             score = 50 - abs(t_dist - 15)
 
+            # Бонус за направление к чужим воротам
             if goal_opp:
                 goal_dir = goal_opp.get("dir", 0)
                 dir_diff = abs(t_dir - goal_dir)
@@ -134,15 +149,7 @@ class CtrlLow(HierarchicalController):
                 elif dir_diff < 70:
                     score += 10
 
-            # Штраф за пас к своим воротам
-            if goal_own:
-                own_dir = goal_own.get("dir", 0)
-                own_diff = abs(t_dir - own_dir)
-                if own_diff > 180:
-                    own_diff = 360 - own_diff
-                if own_diff < 30:
-                    score -= 50
-
+            # Штраф за противника на пути
             for opp in opponents:
                 opp_dist = opp.get("dist", 9999)
                 opp_dir = opp.get("dir", 0)

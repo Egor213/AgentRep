@@ -1,12 +1,3 @@
-# ===== FILE: src/start_team.py =====
-
-"""
-Запуск полной команды из 7 игроков (1-3-3).
-Использование:
-    python start_team.py --team teamA --side l
-    python start_team.py --team teamB --side r
-"""
-
 import subprocess
 import sys
 import time
@@ -27,6 +18,9 @@ ROLES = [
 def start_team(team_name, side):
     processes = []
     for role in ROLES:
+        # if side == "r":
+        #     if role == "forward_bottom":
+        #         continue
         cmd = [
             sys.executable, "main.py",
             "--team", team_name,
@@ -49,8 +43,6 @@ def main():
 
     processes = start_team(args.team, args.side)
 
-    print(f"\nКоманда {args.team} (side={args.side}): {len(processes)} игроков")
-    print("Ctrl+C для остановки")
 
     try:
         for p in processes:

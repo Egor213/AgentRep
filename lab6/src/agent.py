@@ -108,7 +108,6 @@ class Agent:
                     mid = self.controllers[1]
                     mid.action = "go_to_flag"
                     mid.target_flag = mid.home_flag
-                # Сбросить состояние вратаря
                 if len(self.controllers) > 2:
                     high = self.controllers[2]
                     if hasattr(high, 'ball_caught'):
@@ -161,7 +160,6 @@ class Agent:
         upper = self.controllers[1:]
         result = low.execute(input_data, upper)
 
-        # Обработка результата — поддержка catch, kick, dash, turn
         if result and isinstance(result, tuple) and len(result) == 2:
             cmd, params = result
             self._send_command(cmd, params)

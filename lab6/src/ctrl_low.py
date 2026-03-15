@@ -1,8 +1,15 @@
-# ===== FILE: src/ctrl_low.py =====
-
 import math
 from hierarchical_controller import HierarchicalController
 from flags import FLAGS
+
+def find_closest_flag_filtered(data):
+    flags = {k: v for k, v in data.items() if k.startswith('f')}
+    
+    if not flags:
+        return None, None
+    
+    closest = min(flags.items(), key=lambda x: x[1]['dist'])
+    return closest[0], closest[1]['dist']
 
 
 class CtrlLow(HierarchicalController):
@@ -39,6 +46,7 @@ class CtrlLow(HierarchicalController):
             "i_am_closest_to_ball": True,
             "pass_to_me": False,
             "best_pass_target": None,
+            "memory": self.memory,
         }
 
         if "b" in visible:
@@ -51,8 +59,12 @@ class CtrlLow(HierarchicalController):
 
         if goal_own_key in visible:
             result["goal_own"] = visible[goal_own_key]
+
+
         if goal_opp_key in visible:
             result["goal_opp"] = visible[goal_opp_key]
+        
+        result["min_flag"] = find_closest_flag_filtered(visible)[0]
 
         for key, obj in visible.items():
             if key in FLAGS:
@@ -126,19 +138,18 @@ class CtrlLow(HierarchicalController):
             if t_dist > 35 or t_dist < 3:
                 continue
 
-            # === ЖЁСТКАЯ ПРОВЕРКА: тиммейт в направлении своих ворот — ПРОПУСТИТЬ ===
             if goal_own:
                 own_dir = goal_own.get("dir", 0)
                 diff_to_own = abs(t_dir - own_dir)
                 if diff_to_own > 180:
                     diff_to_own = 360 - diff_to_own
-                # Если тиммейт в секторе ±60° от направления своих ворот — НЕ пасовать
+
                 if diff_to_own < 60:
                     continue
 
             score = 50 - abs(t_dist - 15)
 
-            # Бонус за направление к чужим воротам
+    
             if goal_opp:
                 goal_dir = goal_opp.get("dir", 0)
                 dir_diff = abs(t_dir - goal_dir)

@@ -17,7 +17,6 @@ class HierarchicalController:
             rest = upper_controllers[1:]
             upper_result = next_ctrl.execute(result, rest)
             return self.merge(result, upper_result)
-
         return self.finalize(result)
 
     def process(self, input_data):

@@ -92,7 +92,7 @@ def create_goalie_ta():
 
         'move_to_own_goal': [
             (
-                check_timer('last_find_boal', 15),
+                check_timer('last_find_boal', 30),
                 update_timers('last_find_boal'),
                 'determine_distance_to_ball',
             ),
@@ -103,7 +103,7 @@ def create_goalie_ta():
             ),
             (
                 TRUE_FUNC,
-                lambda mgr, s: ("turn", "180"),
+                lambda mgr, s: ("turn", str(int(mgr.getAngle("b")))),
                 'at_football_goal'
             ),
         ],
@@ -111,7 +111,7 @@ def create_goalie_ta():
         'determine_distance_to_ball': [
             (
                 lambda mgr, s: not mgr.getVisible("b"),
-                lambda mgr, s: ("turn", "60"),
+                lambda mgr, s: ("turn", "90"),
                 'determine_distance_to_ball',
             ),
             (
@@ -120,7 +120,7 @@ def create_goalie_ta():
                 'move_to_ball_and_kick',
             ),
             (
-                check_timer('last_find_boal', 5),
+                check_timer('last_find_boal', 4),
                 update_timers('last_find_boal'),
                 'serch_football_goal',
             ),
@@ -162,7 +162,7 @@ def create_goalie_ta():
             ),
             (
                 TRUE_FUNC,
-                lambda mgr, s: ("turn", str(int(mgr.getAngle("b")))),
+                update_timers('last_find_boal'),
                 'move_to_ball_and_kick'
             ),
         ],

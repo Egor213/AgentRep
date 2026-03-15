@@ -1,6 +1,7 @@
 from ta import TA
 from attacker_ta import create_attacker_ta
 from goalie_ta import create_goalie_ta
+from defender_ta import create_defender_ta
 from ta_manager import TAManager
 
 
@@ -15,7 +16,7 @@ class Controller:
         elif role == "attacker":
             ta = create_attacker_ta()
         else:
-            raise Exception("not support role")
+            ta = create_defender_ta()
 
         self.ta = TA(ta)
 

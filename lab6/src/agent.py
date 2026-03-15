@@ -28,8 +28,6 @@ class Agent:
         self.socket = SocketClient()
         self.play_on = False
         self.running = False
-        self.x = None
-        self.y = None
         self.visible_objects = {}
         self.controllers = controllers
         self.start_pos = (-15, 0)
@@ -66,7 +64,7 @@ class Agent:
             low.side = self.side
             low.team = self.team
             low.player_number = self.player_number
-            # Обновляем side во всех контроллерах
+            low.role_key = self.role
             for ctrl in self.controllers:
                 if hasattr(ctrl, 'side'):
                     ctrl.side = self.side
@@ -105,7 +103,6 @@ class Agent:
             elif msg_str.startswith("goal_"):
                 self.play_on = False
                 self.move(*self.start_pos)
-                # Сброс среднего контроллера
                 if len(self.controllers) > 1:
                     mid = self.controllers[1]
                     mid.action = "go_to_flag"
@@ -158,9 +155,18 @@ class Agent:
         upper = self.controllers[1:]
         result = low.execute(input_data, upper)
 
+        # Обработка результата
         if result and isinstance(result, tuple) and len(result) == 2:
             cmd, params = result
             self._send_command(cmd, params)
+        elif result and isinstance(result, dict):
+            # Результат с дополнительными данными (say)
+            if "command" in result:
+                cmd_tuple = result["command"]
+                if cmd_tuple and isinstance(cmd_tuple, tuple) and len(cmd_tuple) == 2:
+                    self._send_command(cmd_tuple[0], cmd_tuple[1])
+            if "say" in result:
+                self.say(result["say"])
 
         self.last_heard_msg = None
         self.referee_msg = None

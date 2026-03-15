@@ -6,9 +6,9 @@ from hierarchical_controller import HierarchicalController
 class CtrlHighDefender(HierarchicalController):
     """
     Верхний уровень — защитник:
-    - Мяч рядом → отбить / пас тиммейту
-    - Мяч видим и близко (< 15) → перехватить
-    - Иначе → держать позицию у своего флага
+    - Мяч рядом → пас нападающему или выбить вперёд
+    - Мяч близко и я ближайший → перехватить
+    - Иначе → позиция у флага
     """
 
     def __init__(self, side, home_flag):
@@ -18,44 +18,47 @@ class CtrlHighDefender(HierarchicalController):
         self.last = None
 
     def process(self, input_data):
-        # 1. Мяч рядом — отбить
+        # 1. Мяч рядом — пас или выбить
         if input_data.get("can_kick"):
             self.last = "kick"
-            goal_opp = input_data.get("goal_opp")
-            teammates = input_data.get("teammates", [])
+            return self._kick_decision(input_data)
 
-            if teammates:
-                best = min(teammates, key=lambda t: t.get("dist", 9999))
-                angle = best.get("dir", 0)
-                dist = best.get("dist", 10)
-                power = min(100, int(dist * 3 + 30))
-                return ("kick", f"{power} {int(angle)}")
+        # 2. Приём паса — бежать к мячу
+        if input_data.get("pass_to_me"):
+            self.last = "receive"
+            return {"new_action": "receive_pass"}
 
-            if goal_opp:
-                return ("kick", f"80 {int(goal_opp.get('dir', 0))}")
-            return ("kick", "50 0")
-
-        # 2. Мяч видим и близко — перехватить
+        # 3. Перехват
         ball = input_data.get("ball")
         if ball:
             ball_dist = ball.get("dist", 9999)
+            i_am_closest = input_data.get("i_am_closest_to_ball", True)
+            teammate_near = input_data.get("teammate_near_ball", False)
 
-            # Защитник бежит только если мяч рядом (< 15)
-            # И нет тиммейта который ещё ближе
-            if ball_dist < 15:
-                teammates = input_data.get("teammates", [])
-                am_closest = True
-                for t in teammates:
-                    if t.get("dist", 9999) < ball_dist - 3:
-                        am_closest = False
-                        break
-                if am_closest:
-                    self.last = "defend"
-                    return {"new_action": "go_to_ball"}
+            if ball_dist < 15 and i_am_closest and not teammate_near:
+                self.last = "defend"
+                return {"new_action": "go_to_ball"}
 
-        # 3. Вернуться на позицию
-        if self.last in ("defend", "kick"):
+        # 4. Вернуться
+        if self.last in ("defend", "kick", "receive"):
             self.last = None
             return {"new_action": "return_home"}
 
         return None
+
+    def _kick_decision(self, data):
+        """Защитник: пас тиммейту ближе к чужим воротам."""
+        best_target = data.get("best_pass_target")
+
+        if best_target:
+            angle = best_target.get("dir", 0)
+            dist = best_target.get("dist", 10)
+            power = min(100, int(dist * 3.5 + 25))
+            return {"command": ("kick", f"{power} {int(angle)}"), "say": "pass"}
+
+        # Нет — выбить в сторону чужих ворот
+        goal_opp = data.get("goal_opp")
+        if goal_opp:
+            return ("kick", f"80 {int(goal_opp.get('dir', 0))}")
+
+        return ("kick", "60 0")

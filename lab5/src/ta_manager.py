@@ -1,15 +1,11 @@
-class DTManager:
-    """
-    Предоставляет интерфейс для рутинных задач
-    """
-
+class TAManager:
     def __init__(self):
         self.visible = {}
         self.team = ""
         self.side = ""
         self.player_number = 0
-        self.x = None
-        self.y = None
+
+        self.time_cycle = 0
 
     def update(
         self,
@@ -17,15 +13,13 @@ class DTManager:
         team: str = "",
         side: str = "",
         player_number: int = 0,
-        x=None,
-        y=None,
+        time_cycle: int = 0,
     ):
         self.visible = visible_objects
         self.team = team
         self.side = side
         self.player_number = player_number
-        self.x = x
-        self.y = y
+        self.time_cycle = time_cycle
 
     def getVisible(self, obj_key: str) -> bool:
         return obj_key in self.visible
@@ -34,11 +28,6 @@ class DTManager:
         if obj_key in self.visible:
             return self.visible[obj_key].get("dist", 9999)
         return 9999
-    
-    def getDistChange(self, obj_key: str) -> float:
-        if obj_key in self.visible:
-            return self.visible[obj_key].get("dist_change", 0)
-        return 0
 
     def getAngle(self, obj_key: str) -> float:
         if obj_key in self.visible:
@@ -63,3 +52,12 @@ class DTManager:
         if not teammates:
             return None
         return min(teammates, key=lambda t: t[1].get("dist", 9999))
+
+    def own_goal_key(self) -> str:
+        return "gl" if self.side == "l" else "gr"
+
+    def enemy_goal_key(self) -> str:
+        return "gr" if self.side == "l" else "gl"
+
+    def own_penalty_center_flag(self) -> str:
+        return "fplc" if self.side == "l" else "fprc"

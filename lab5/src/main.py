@@ -11,24 +11,12 @@ def main():
     parser.add_argument("--team", type=str, default="teamA")
     parser.add_argument("--x", type=int, default=-15)
     parser.add_argument("--y", type=int, default=0)
-    parser.add_argument("--goalie", action="store_true")
-    parser.add_argument('--actions', type=str)
+    parser.add_argument("--role", type=str, choices=["goalie", "attacker", "defender"], required=True)
     args = parser.parse_args()
-
-    if args.actions:
-        actions = json.loads(args.actions)
-    else:
-        actions = []
-
-    controller = Controller(
-        actions,
-        is_goalie=args.goalie
-    )
 
     agent = Agent(
         team_name=args.team,
-        is_goalie=args.goalie,
-        controller=controller,
+        role=args.role,
     )
 
     try:

@@ -1,45 +1,49 @@
-from decision_tree import DecisionTree
-from dt_manager import DTManager
-from player_dt import create_player_tree
-from goalie_dt import create_goalie_tree
+from ta import TA
+from attacker_ta import create_attacker_ta
+from goalie_ta import create_goalie_ta
+from ta_manager import TAManager
 
 
 class Controller:
-    def __init__(self, actions: list[dict] = None, is_goalie: bool = False):
-        self.is_goalie = is_goalie
-        self.manager = DTManager()
 
-        if is_goalie:
-            tree_dict = create_goalie_tree()
+    def __init__(self, role, team, side, player_number):
+
+        self.manager = TAManager()
+
+        if role == "goalie":
+            ta = create_goalie_ta()
+        elif role == "attacker":
+            ta = create_attacker_ta()
         else:
-            tree_dict = create_player_tree(actions)
+            raise Exception("not support role")
 
-        self.dt = DecisionTree(tree_dict)
+        self.ta = TA(ta)
+
+        self.team = team
+        self.side = side
+        self.player_number = player_number
+
 
     def reset(self):
-        state = self.dt.state
-        if "next" in state:
-            state["next"] = 0
-            if "sequence" in state:
-                state["action"] = state["sequence"][0]
-        state["command"] = None
+        self.ta.reset()
+
 
     def decide(
         self,
-        visible_objects: dict,
-        game_on: bool,
-        team: str = "",
-        side: str = "",
-        player_number: int = 0,
-        x=None,
-        y=None,
-    ) -> tuple[str, str] | None:
+        visible_objects,
+        game_on,
+        time_cycle
+    ):
+
         if not game_on:
             return None
 
-        self.manager.update(visible_objects, team, side, player_number, x, y)
-        result = self.dt.execute(self.manager)
+        self.manager.update(
+            visible_objects,
+            self.team,
+            self.side,
+            self.player_number,
+            time_cycle
+        )
 
-        if result and isinstance(result, tuple) and len(result) == 2:
-            return result
-        return None
+        return self.ta.step(self.manager)

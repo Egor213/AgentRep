@@ -5,12 +5,8 @@ from hierarchical_controller import HierarchicalController
 
 class CtrlMid(HierarchicalController):
     """
-    Средний уровень — тактика:
-    - go_to_flag: движение к флагу
-    - scan_field: обзор поля
-    - go_to_ball: движение к мячу
-    - return_home: возврат на базу
-    - receive_pass: активное движение к мячу после крика "pass"
+    Средний уровень — тактика.
+    Быстрое сканирование, агрессивное движение к мячу.
     """
 
     def __init__(self, home_flag, role, side):
@@ -21,16 +17,14 @@ class CtrlMid(HierarchicalController):
         self.action = "go_to_flag"
         self.target_flag = home_flag
         self.scan_steps = 0
-        self.say_msg = None  # Сообщение для крика
 
     def process(self, input_data):
         result = dict(input_data)
         result["cmd"] = None
         result["mid_action"] = self.action
-        self.say_msg = None
 
-        # Если мне крикнули "pass" — переключиться на приём
-        if input_data.get("pass_to_me") and self.action != "receive_pass":
+        # Приём паса — приоритетный переход
+        if input_data.get("pass_to_me") and self.action not in ("receive_pass",):
             self.action = "receive_pass"
 
         if self.action == "go_to_flag":
@@ -45,15 +39,17 @@ class CtrlMid(HierarchicalController):
             result["cmd"] = self._go_to_flag(input_data)
         elif self.action == "receive_pass":
             result["cmd"] = self._receive_pass(input_data)
+        elif self.action == "dribble":
+            result["cmd"] = self._dribble(input_data)
+        elif self.action == "watch_ball":
+            result["cmd"] = self._watch_ball(input_data)
 
-        result["say_msg"] = self.say_msg
         return result
 
     def merge(self, own_result, upper_result):
-        # Словарь с command+say — пробросить как есть
         if upper_result and isinstance(upper_result, dict):
             if "command" in upper_result:
-                return upper_result  # {command: (...), say: "pass"}
+                return upper_result
             if "new_action" in upper_result:
                 new_act = upper_result["new_action"]
                 if isinstance(new_act, dict):
@@ -87,56 +83,88 @@ class CtrlMid(HierarchicalController):
             power = min(100, int(dist * 2 + 30))
             return ("dash", str(power))
 
-        return ("turn", "45")
+        return ("turn", "60")
 
     def _scan_field(self, data):
+        """Быстрое сканирование — большие углы поворота."""
         ball = data.get("ball")
         if ball:
             self.scan_steps = 0
-            return None
+            return None  # Мяч виден — наверх
 
         self.scan_steps += 1
-        if self.scan_steps > 12:
+        if self.scan_steps > 6:
             self.scan_steps = 0
-        return ("turn", "30")
+        return ("turn", "60")
 
     def _go_to_ball(self, data):
         ball = data.get("ball")
         if not ball:
-            self.action = "return_home"
-            self.target_flag = self.home_flag
-            return ("turn", "45")
+            # Потеряли мяч — быстро искать
+            return ("turn", "60")
 
         angle = ball.get("dir", 0)
         dist = ball.get("dist", 9999)
 
         if dist < 0.7:
-            return None
+            return None  # Наверх — решение об ударе
 
-        if abs(angle) > 10:
+        if abs(angle) > 5:
             return ("turn", str(int(angle)))
 
-        power = min(100, int(dist * 6 + 40))
+        power = min(100, int(dist * 8 + 50))
         return ("dash", str(power))
 
     def _receive_pass(self, data):
-        """Приём паса — агрессивно бежим к мячу."""
         ball = data.get("ball")
         if not ball:
-            # Мяч не виден — крутимся искать
-            return ("turn", "30")
+            return ("turn", "40")
 
         angle = ball.get("dir", 0)
         dist = ball.get("dist", 9999)
 
         if dist < 0.7:
-            # Мяч получен — переходим к обычной логике
             self.action = "scan_field"
             return None
 
         if abs(angle) > 5:
             return ("turn", str(int(angle)))
 
-        # Бежим быстро
-        power = min(100, int(dist * 8 + 50))
+        power = min(100, int(dist * 10 + 50))
         return ("dash", str(power))
+
+    def _dribble(self, data):
+        """Ведение мяча к чужим воротам — подбивать мяч вперёд и бежать."""
+        ball = data.get("ball")
+        if not ball:
+            self.action = "scan_field"
+            return ("turn", "60")
+
+        dist = ball.get("dist", 9999)
+        if dist > 2.0:
+            # Мяч убежал — догнать
+            self.action = "go_to_ball"
+            return self._go_to_ball(data)
+
+        # Мяч рядом — наверх решит что делать (удар/пас/ведение)
+        if dist < 0.7:
+            return None
+
+        angle = ball.get("dir", 0)
+        if abs(angle) > 5:
+            return ("turn", str(int(angle)))
+
+        return ("dash", str(min(80, int(dist * 6 + 30))))
+
+    def _watch_ball(self, data):
+        """Следить за мячом — поворачиваться к нему, но не бежать."""
+        ball = data.get("ball")
+        if not ball:
+            return ("turn", "40")
+
+        angle = ball.get("dir", 0)
+        if abs(angle) > 5:
+            return ("turn", str(int(angle)))
+
+        # Мяч в поле зрения — передать наверх
+        return None

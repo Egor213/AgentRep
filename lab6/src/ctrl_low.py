@@ -6,13 +6,6 @@ from flags import FLAGS
 
 
 class CtrlLow(HierarchicalController):
-    """
-    Нижний уровень — восприятие:
-    - Выделяет мяч, флаги, своих, чужих
-    - Определяет can_kick
-    - Оценивает кто ближе к мячу (теорема косинусов)
-    - Разбирает heard-сообщения для пасов
-    """
 
     def __init__(self, team, side, role):
         super().__init__()
@@ -42,21 +35,17 @@ class CtrlLow(HierarchicalController):
             "flags": {},
             "teammates": [],
             "opponents": [],
-            # Координация
             "teammate_near_ball": False,
             "i_am_closest_to_ball": True,
-            # Пасы
-            "pass_to_me": False,  # мне кричали "pass"
-            "best_pass_target": None,  # лучший тиммейт для паса
+            "pass_to_me": False,
+            "best_pass_target": None,
         }
 
-        # Мяч
         if "b" in visible:
             result["ball"] = visible["b"]
             if visible["b"].get("dist", 9999) < 0.7:
                 result["can_kick"] = True
 
-        # Ворота
         goal_own_key = "gl" if self.side == "l" else "gr"
         goal_opp_key = "gr" if self.side == "l" else "gl"
 
@@ -65,12 +54,10 @@ class CtrlLow(HierarchicalController):
         if goal_opp_key in visible:
             result["goal_opp"] = visible[goal_opp_key]
 
-        # Флаги
         for key, obj in visible.items():
             if key in FLAGS:
                 result["flags"][key] = obj
 
-        # Игроки
         for key, obj in visible.items():
             name = obj.get("name", [])
             if not isinstance(name, list) or len(name) < 2:
@@ -82,13 +69,9 @@ class CtrlLow(HierarchicalController):
                 else:
                     result["opponents"].append(obj)
 
-        # Оценка кто ближе к мячу
         self._evaluate_ball_proximity(result)
-
-        # Выбор лучшего для паса
         self._find_best_pass_target(result)
 
-        # Разбор heard
         last_heard = input_data.get("last_heard_msg")
         if last_heard == "pass":
             result["pass_to_me"] = True
@@ -112,27 +95,21 @@ class CtrlLow(HierarchicalController):
                             - 2 * my_ball_dist * t_dist * math.cos(angle_diff))
             t_to_ball = math.sqrt(max(0, t_to_ball_sq))
 
-            if t_to_ball < 2.0:
+            if t_to_ball < 1.5:
                 result["teammate_near_ball"] = True
                 result["i_am_closest_to_ball"] = False
                 return
 
-            if t_to_ball < my_ball_dist - 2:
+            if t_to_ball < my_ball_dist - 1.5:
                 result["i_am_closest_to_ball"] = False
 
     def _find_best_pass_target(self, result):
-        """
-        Выбирает лучшего тиммейта для паса:
-        - Предпочитает тех кто дальше от наших ворот (ближе к чужим)
-        - Не слишком далеко (< 35) чтобы пас дошёл
-        - Не слишком близко (> 5) чтобы имело смысл
-        - Без противников на пути (грубая проверка)
-        """
         teammates = result["teammates"]
         if not teammates:
             return
 
         goal_opp = result["goal_opp"]
+        goal_own = result["goal_own"]
         opponents = result["opponents"]
 
         best = None
@@ -142,29 +119,35 @@ class CtrlLow(HierarchicalController):
             t_dist = t.get("dist", 9999)
             t_dir = t.get("dir", 0)
 
-            # Фильтр по расстоянию
             if t_dist > 35 or t_dist < 3:
                 continue
 
-            # Базовый счёт: предпочитаем средние расстояния
             score = 50 - abs(t_dist - 15)
 
-            # Бонус если тиммейт в направлении чужих ворот
             if goal_opp:
                 goal_dir = goal_opp.get("dir", 0)
                 dir_diff = abs(t_dir - goal_dir)
+                if dir_diff > 180:
+                    dir_diff = 360 - dir_diff
                 if dir_diff < 40:
-                    score += 30  # В направлении ворот
+                    score += 30
                 elif dir_diff < 70:
                     score += 10
 
-            # Штраф если противник на пути паса
+            # Штраф за пас к своим воротам
+            if goal_own:
+                own_dir = goal_own.get("dir", 0)
+                own_diff = abs(t_dir - own_dir)
+                if own_diff > 180:
+                    own_diff = 360 - own_diff
+                if own_diff < 30:
+                    score -= 50
+
             for opp in opponents:
                 opp_dist = opp.get("dist", 9999)
                 opp_dir = opp.get("dir", 0)
-                # Противник между мной и тиммейтом, и примерно в том же направлении
                 if opp_dist < t_dist and abs(opp_dir - t_dir) < 15:
-                    score -= 40  # Пас скорее всего перехватят
+                    score -= 40
 
             if score > best_score:
                 best_score = score
@@ -173,12 +156,10 @@ class CtrlLow(HierarchicalController):
         if best and best_score > 0:
             result["best_pass_target"] = best
 
-    
     def merge(self, own_result, upper_result):
-        # Словарь с command+say — пробросить как есть
         if upper_result and isinstance(upper_result, dict):
             if "command" in upper_result:
-                return upper_result  # {command: (...), say: "pass"}
+                return upper_result
             if "new_action" in upper_result:
                 own_result["new_action"] = upper_result["new_action"]
         if upper_result and isinstance(upper_result, tuple):

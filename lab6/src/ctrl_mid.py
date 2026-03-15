@@ -4,10 +4,6 @@ from hierarchical_controller import HierarchicalController
 
 
 class CtrlMid(HierarchicalController):
-    """
-    Средний уровень — тактика.
-    Быстрое сканирование, агрессивное движение к мячу.
-    """
 
     def __init__(self, home_flag, role, side):
         super().__init__()
@@ -23,7 +19,6 @@ class CtrlMid(HierarchicalController):
         result["cmd"] = None
         result["mid_action"] = self.action
 
-        # Приём паса — приоритетный переход
         if input_data.get("pass_to_me") and self.action not in ("receive_pass",):
             self.action = "receive_pass"
 
@@ -86,11 +81,10 @@ class CtrlMid(HierarchicalController):
         return ("turn", "60")
 
     def _scan_field(self, data):
-        """Быстрое сканирование — большие углы поворота."""
         ball = data.get("ball")
         if ball:
             self.scan_steps = 0
-            return None  # Мяч виден — наверх
+            return None
 
         self.scan_steps += 1
         if self.scan_steps > 6:
@@ -100,14 +94,13 @@ class CtrlMid(HierarchicalController):
     def _go_to_ball(self, data):
         ball = data.get("ball")
         if not ball:
-            # Потеряли мяч — быстро искать
             return ("turn", "60")
 
         angle = ball.get("dir", 0)
         dist = ball.get("dist", 9999)
 
         if dist < 0.7:
-            return None  # Наверх — решение об ударе
+            return None
 
         if abs(angle) > 5:
             return ("turn", str(int(angle)))
@@ -134,7 +127,6 @@ class CtrlMid(HierarchicalController):
         return ("dash", str(power))
 
     def _dribble(self, data):
-        """Ведение мяча к чужим воротам — подбивать мяч вперёд и бежать."""
         ball = data.get("ball")
         if not ball:
             self.action = "scan_field"
@@ -142,11 +134,9 @@ class CtrlMid(HierarchicalController):
 
         dist = ball.get("dist", 9999)
         if dist > 2.0:
-            # Мяч убежал — догнать
             self.action = "go_to_ball"
             return self._go_to_ball(data)
 
-        # Мяч рядом — наверх решит что делать (удар/пас/ведение)
         if dist < 0.7:
             return None
 
@@ -157,7 +147,6 @@ class CtrlMid(HierarchicalController):
         return ("dash", str(min(80, int(dist * 6 + 30))))
 
     def _watch_ball(self, data):
-        """Следить за мячом — поворачиваться к нему, но не бежать."""
         ball = data.get("ball")
         if not ball:
             return ("turn", "40")
@@ -166,5 +155,4 @@ class CtrlMid(HierarchicalController):
         if abs(angle) > 5:
             return ("turn", str(int(angle)))
 
-        # Мяч в поле зрения — передать наверх
         return None

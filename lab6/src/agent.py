@@ -76,6 +76,7 @@ class Agent:
         self.socket.send(f"(say {message})")
 
     def _send_command(self, cmd: str, params: str):
+        """Отправка команды серверу. Поддерживает kick, dash, turn, catch."""
         self.socket.send(f"({cmd} {params})")
 
     def process_message(self, msg: str):
@@ -107,6 +108,11 @@ class Agent:
                     mid = self.controllers[1]
                     mid.action = "go_to_flag"
                     mid.target_flag = mid.home_flag
+                # Сбросить состояние вратаря
+                if len(self.controllers) > 2:
+                    high = self.controllers[2]
+                    if hasattr(high, 'ball_caught'):
+                        high.ball_caught = False
         else:
             self.last_heard_msg = str(message)
 
@@ -155,12 +161,11 @@ class Agent:
         upper = self.controllers[1:]
         result = low.execute(input_data, upper)
 
-        # Обработка результата
+        # Обработка результата — поддержка catch, kick, dash, turn
         if result and isinstance(result, tuple) and len(result) == 2:
             cmd, params = result
             self._send_command(cmd, params)
         elif result and isinstance(result, dict):
-            # Результат с дополнительными данными (say)
             if "command" in result:
                 cmd_tuple = result["command"]
                 if cmd_tuple and isinstance(cmd_tuple, tuple) and len(cmd_tuple) == 2:

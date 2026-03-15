@@ -6,7 +6,7 @@ from hierarchical_controller import HierarchicalController
 class CtrlHighForward(HierarchicalController):
     """
     Верхний уровень — нападающий:
-    - Мяч рядом → удар по воротам ИЛИ пас другому нападающему
+    - Мяч рядом → удар по воротам ИЛИ пас (НИКОГДА не в свои ворота)
     - Приём паса → бежать к мячу
     - Мяч виден, я ближайший → бежать
     - Тиммейт у мяча → открыться для паса
@@ -20,17 +20,14 @@ class CtrlHighForward(HierarchicalController):
         self.last = None
 
     def process(self, input_data):
-        # 1. Мяч рядом — бить или пасовать
         if input_data.get("can_kick"):
             self.last = "kick"
             return self._kick_decision(input_data)
 
-        # 2. Приём паса — бежать к мячу
         if input_data.get("pass_to_me"):
             self.last = "receive"
             return {"new_action": "receive_pass"}
 
-        # 3. Мяч виден
         ball = input_data.get("ball")
         if ball:
             ball_dist = ball.get("dist", 9999)
@@ -38,7 +35,6 @@ class CtrlHighForward(HierarchicalController):
             teammate_near = input_data.get("teammate_near_ball", False)
 
             if teammate_near:
-                # Тиммейт у мяча — открыться для паса
                 if self.last != "position":
                     self.last = "position"
                     return {"new_action": {"action": "go_to_flag", "flag": self.attack_flag}}
@@ -48,7 +44,6 @@ class CtrlHighForward(HierarchicalController):
                 self.last = "go_ball"
                 return {"new_action": "go_to_ball"}
 
-        # 4. Идти к атакующей позиции
         if self.last in ("go_ball", "kick", "receive"):
             self.last = None
             return {"new_action": {"action": "go_to_flag", "flag": self.attack_flag}}
@@ -56,46 +51,66 @@ class CtrlHighForward(HierarchicalController):
         return None
 
     def _kick_decision(self, data):
-        """
-        Нападающий у мяча:
-        1. Если ворота видны и близко (< 25) → бить
-        2. Если есть тиммейт в лучшей позиции → пас
-        3. Если ворота видны далеко → бить сильно
-        4. Иначе → подкинуть вбок
-        """
         goal_opp = data.get("goal_opp")
+        goal_own = data.get("goal_own")
         best_target = data.get("best_pass_target")
 
-        # Ворота близко — бить!
+        # Ворота противника близко — бить!
         if goal_opp:
             goal_dist = goal_opp.get("dist", 9999)
             goal_angle = goal_opp.get("dir", 0)
 
-            if goal_dist < 25:
+            if goal_dist < 30:
                 power = min(100, int(70 + goal_dist))
                 return ("kick", f"{power} {int(goal_angle)}")
 
-            # Ворота далеко — пас если есть тиммейт ближе к воротам
+            # Далеко — пас если есть тиммейт в хорошей позиции
             if best_target:
                 t_dir = best_target.get("dir", 0)
                 t_dist = best_target.get("dist", 10)
 
-                # Пасуем если тиммейт ближе к воротам (по направлению)
-                t_goal_diff = abs(t_dir - goal_angle)
-                if t_goal_diff < 60 and t_dist < 30:
-                    power = min(100, int(t_dist * 3.5 + 25))
-                    return {"command": ("kick", f"{power} {int(t_dir)}"), "say": "pass"}
+                if not self._is_toward_own_goal(t_dir, goal_own):
+                    t_goal_diff = abs(t_dir - goal_angle)
+                    if t_goal_diff < 60 and t_dist < 30:
+                        power = min(100, int(t_dist * 3.5 + 25))
+                        return {"command": ("kick", f"{power} {int(t_dir)}"), "say": "pass"}
 
             # Бить по воротам всё равно
             power = min(100, int(50 + goal_dist))
             return ("kick", f"{power} {int(goal_angle)}")
 
-        # Ворота не видны
+        # Ворота противника не видны
         if best_target:
             t_dir = best_target.get("dir", 0)
             t_dist = best_target.get("dist", 10)
-            power = min(100, int(t_dist * 3.5 + 25))
-            return {"command": ("kick", f"{power} {int(t_dir)}"), "say": "pass"}
+            if not self._is_toward_own_goal(t_dir, goal_own):
+                power = min(100, int(t_dist * 3.5 + 25))
+                return {"command": ("kick", f"{power} {int(t_dir)}"), "say": "pass"}
 
-        # Ничего не видим — подкинуть вбок
-        return ("kick", "10 45")
+        # Ничего хорошего не видим — увести мяч от своих ворот
+        if goal_own:
+            own_angle = goal_own.get("dir", 0)
+            safe_angle = self._opposite_angle(own_angle)
+            return ("kick", f"30 {int(safe_angle)}")
+
+        # Совсем ничего — подкинуть вбок
+        return ("kick", "15 90")
+
+    def _is_toward_own_goal(self, kick_angle, goal_own):
+        """Проверяет, направлен ли удар в сторону своих ворот."""
+        if not goal_own:
+            return False
+        own_angle = goal_own.get("dir", 0)
+        diff = abs(kick_angle - own_angle)
+        if diff > 180:
+            diff = 360 - diff
+        return diff < 40
+
+    def _opposite_angle(self, angle):
+        """Угол в противоположную сторону."""
+        opposite = angle + 180
+        if opposite > 180:
+            opposite -= 360
+        if opposite < -180:
+            opposite += 360
+        return opposite

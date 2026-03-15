@@ -47,10 +47,13 @@ class CtrlLow(HierarchicalController):
             "pass_to_me": False,
             "best_pass_target": None,
             "memory": self.memory,
+            "teammates_closer_to_ball": 0,
+            "my_ball_dist": 9999,
         }
 
         if "b" in visible:
             result["ball"] = visible["b"]
+            result["my_ball_dist"] = visible["b"].get("dist", 9999)
             if visible["b"].get("dist", 9999) < 0.7:
                 result["can_kick"] = True
 
@@ -59,7 +62,6 @@ class CtrlLow(HierarchicalController):
 
         if goal_own_key in visible:
             result["goal_own"] = visible[goal_own_key]
-
 
         if goal_opp_key in visible:
             result["goal_opp"] = visible[goal_opp_key]
@@ -90,11 +92,37 @@ class CtrlLow(HierarchicalController):
 
         return result
 
+    def _evaluate_ball_proximity(self, result):
+        ball = result["ball"]
+        if not ball:
+            return
+
+        my_ball_dist = ball.get("dist", 9999)
+        ball_dir = ball.get("dir", 0)
+        teammates_closer = 0
+
+        for t in result["teammates"]:
+            t_dist = t.get("dist", 9999)
+            t_dir = t.get("dir", 0)
+
+            angle_diff = math.radians(abs(ball_dir - t_dir))
+            t_to_ball_sq = (my_ball_dist ** 2 + t_dist ** 2
+                            - 2 * my_ball_dist * t_dist * math.cos(angle_diff))
+            t_to_ball = math.sqrt(max(0, t_to_ball_sq))
+
+            if t_to_ball < 1.5:
+                result["teammate_near_ball"] = True
+                result["i_am_closest_to_ball"] = False
+                teammates_closer += 1
+                continue
+
+            if t_to_ball < my_ball_dist - 1.5:
+                result["i_am_closest_to_ball"] = False
+                teammates_closer += 1
+
+        result["teammates_closer_to_ball"] = teammates_closer
+
     def _find_best_pass_target(self, result):
-        """
-        Выбирает лучшего тиммейта для паса.
-        ЖЁСТКО отсекает тиммейтов в направлении своих ворот.
-        """
         teammates = result["teammates"]
         if not teammates:
             return
@@ -124,7 +152,6 @@ class CtrlLow(HierarchicalController):
 
             score = 50 - abs(t_dist - 15)
 
-    
             if goal_opp:
                 goal_dir = goal_opp.get("dir", 0)
                 dir_diff = abs(t_dir - goal_dir)
@@ -135,7 +162,6 @@ class CtrlLow(HierarchicalController):
                 elif dir_diff < 70:
                     score += 10
 
-            # Штраф за противника на пути
             for opp in opponents:
                 opp_dist = opp.get("dist", 9999)
                 opp_dir = opp.get("dir", 0)
@@ -160,38 +186,3 @@ class CtrlLow(HierarchicalController):
         if isinstance(own_result, dict) and "cmd" in own_result:
             return own_result["cmd"]
         return None
-    
-    def _evaluate_ball_proximity(self, result):
-        ball = result["ball"]
-        if not ball:
-            return
-
-        my_ball_dist = ball.get("dist", 9999)
-        ball_dir = ball.get("dir", 0)
-
-        min_teammate_ball_dist = float('inf')
-
-        for t in result["teammates"]:
-            t_dist = t.get("dist", 9999)
-            t_dir = t.get("dir", 0)
-
-            # Расстояние от тиммейта до мяча (теорема косинусов)
-            angle_diff = math.radians(abs(ball_dir - t_dir))
-            t_to_ball_sq = (my_ball_dist ** 2 + t_dist ** 2
-                            - 2 * my_ball_dist * t_dist * math.cos(angle_diff))
-            t_to_ball = math.sqrt(max(0, t_to_ball_sq))
-            
-            # Сохраняем оценку в объекте тиммейта (может пригодиться на верхних уровнях)
-            t["ball_dist_est"] = t_to_ball
-
-            if t_to_ball < 1.5:
-                result["teammate_near_ball"] = True
-
-            if t_to_ball < min_teammate_ball_dist:
-                min_teammate_ball_dist = t_to_ball
-
-        # Только если я действительно ближе всех (с запасом 0.5 м на погрешность)
-        if min_teammate_ball_dist < my_ball_dist - 0.5:
-            result["i_am_closest_to_ball"] = False
-        else:
-            result["i_am_closest_to_ball"] = True

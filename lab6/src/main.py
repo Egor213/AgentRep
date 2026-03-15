@@ -1,5 +1,3 @@
-# ===== FILE: src/main.py =====
-
 import argparse
 import sys
 
@@ -10,10 +8,6 @@ from ctrl_high_goalie import CtrlHighGoalie
 from ctrl_high_defender import CtrlHighDefender
 from ctrl_high_forward import CtrlHighForward
 
-
-# Позиции флагов для каждой роли в зависимости от стороны
-# side "l": свои ворота слева, атакуем вправо
-# side "r": свои ворота справа, атакуем влево
 
 ROLE_CONFIG = {
     "l": {
@@ -86,16 +80,11 @@ ROLE_CONFIG = {
 
 
 def create_agent(team, role_key, side_hint="l"):
-    """
-    Создаёт агента. side_hint используется для определения стартовых позиций.
-    Реальный side обновляется после init от сервера.
-    """
     config = ROLE_CONFIG[side_hint][role_key]
     home_flag = config["home_flag"]
     start_pos = config["start_pos"]
     is_goalie = role_key == "goalie"
 
-    # Определяем базовый тип роли
     if role_key == "goalie":
         base_role = "goalie"
     elif role_key.startswith("defender"):
@@ -113,6 +102,7 @@ def create_agent(team, role_key, side_hint="l"):
     else:
         attack_flag = config.get("attack_flag", "fc")
         high = CtrlHighForward(side=side_hint, home_flag=home_flag, attack_flag=attack_flag)
+        high.role_key = role_key
 
     controllers = [low, mid, high]
 

@@ -19,44 +19,31 @@ class CtrlHighForward(HierarchicalController):
             return {"new_action": "receive_pass"}
 
         ball = input_data.get("ball")
-
-        if ball:
-            ball_dist = ball.get("dist", 9999)
-            ball_angle = ball.get("dir", 0)
-            i_am_closest = input_data.get("i_am_closest_to_ball", True)
-            teammate_near = input_data.get("teammate_near_ball", False)
-
-            if teammate_near and not i_am_closest:
-                if self.last != "position":
-                    self.last = "position"
-                    return {"new_action": {"action": "go_to_flag", "flag": self.attack_flag}}
-                if abs(ball_angle) > 15:
-                    return ("turn", str(int(ball_angle)))
-                return None
-
-            if i_am_closest and ball_dist < 50:
-                self.last = "go_ball"
-                return {"new_action": "go_to_ball"}
-
-            if ball_dist > 30:
-                if self.last != "position":
-                    self.last = "position"
-                    return {"new_action": {"action": "go_to_flag", "flag": self.attack_flag}}
-
-            if ball_dist < 40:
-                self.last = "go_ball"
-                return {"new_action": "go_to_ball"}
-
-        if self.last in ("go_ball", "kick", "receive", "dribble"):
-            self.last = None
+        if not ball:
+            # Если мяч не видим, идём на свою позицию
+            self.last = "position"
             return {"new_action": {"action": "go_to_flag", "flag": self.attack_flag}}
 
-        teams = input_data.get("teammates")
-        if teams and len(teams) > 2:
-            self.last = "return_home"
-            return {"new_action": "return_home"}
+        ball_dist = ball.get("dist", 9999)
+        i_am_closest = input_data.get("i_am_closest_to_ball", False)
+        teammate_near = input_data.get("teammate_near_ball", False)
 
-        return ("turn", "60")
+        # Если я ближайший к мячу и мяч не слишком далеко – иду к мячу
+        if i_am_closest and ball_dist < 50:
+            self.last = "go_ball"
+            return {"new_action": "go_to_ball"}
+
+        # Иначе (кто‑то ближе или мяч далеко) – занимаю позицию для атаки
+        # Но если мяч очень близко (например, < 10), можно всё же пойти поддержать,
+        # даже если не ближайший. Добавим это как исключение.
+        if ball_dist < 10 and not teammate_near:
+            # Рядом никого, можно подстраховать
+            self.last = "go_ball"
+            return {"new_action": "go_to_ball"}
+
+        # В остальных случаях – на свою атакующую позицию
+        self.last = "position"
+        return {"new_action": {"action": "go_to_flag", "flag": self.attack_flag}}
 
     def _kick_decision(self, data):
         goal_opp = data.get("goal_opp")

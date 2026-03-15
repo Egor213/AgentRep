@@ -152,3 +152,7 @@ drop_ball            # спорный мяч
 ```
 rcssserver server::coach=1 server::coach_port=6001
 ```
+
+```
+rcssserver server::coach_w_referee=1 server::coach_port=6001
+```

@@ -5,59 +5,57 @@ from hierarchical_controller import HierarchicalController
 
 class CtrlHighDefender(HierarchicalController):
     """
-    Верхний уровень для защитника:
-    - Если мяч рядом — отбить в сторону чужих ворот или вперёд
-    - Если мяч на своей половине и близко — перехватить
-    - Иначе — держать позицию
+    Верхний уровень — защитник:
+    - Мяч рядом → отбить / пас тиммейту
+    - Мяч видим и близко (< 15) → перехватить
+    - Иначе → держать позицию у своего флага
     """
 
-    def __init__(self, side, home_pos):
+    def __init__(self, side, home_flag):
         super().__init__()
         self.side = side
-        self.home_pos = home_pos
-        self.last_action = None
+        self.home_flag = home_flag
+        self.last = None
 
     def process(self, input_data):
-        # Немедленная реакция: мяч рядом
+        # 1. Мяч рядом — отбить
         if input_data.get("can_kick"):
-            self.last_action = "kick"
+            self.last = "kick"
             goal_opp = input_data.get("goal_opp")
-            # Ищем тиммейта для паса
             teammates = input_data.get("teammates", [])
+
             if teammates:
-                # Пас ближайшему тиммейту
-                closest = min(teammates, key=lambda t: t.get("dist", 9999))
-                angle = closest.get("dir", 0)
-                dist = closest.get("dist", 10)
+                best = min(teammates, key=lambda t: t.get("dist", 9999))
+                angle = best.get("dir", 0)
+                dist = best.get("dist", 10)
                 power = min(100, int(dist * 3 + 30))
                 return ("kick", f"{power} {int(angle)}")
-            if goal_opp:
-                angle = goal_opp.get("dir", 0)
-                return ("kick", f"80 {int(angle)}")
-            return ("kick", "40 0")
 
-        # Мяч на своей половине — перехватить
+            if goal_opp:
+                return ("kick", f"80 {int(goal_opp.get('dir', 0))}")
+            return ("kick", "50 0")
+
+        # 2. Мяч видим и близко — перехватить
         ball = input_data.get("ball")
         if ball:
             ball_dist = ball.get("dist", 9999)
-            x = input_data.get("x")
-            hx = self.home_pos[0]
 
-            # Определяем, на своей ли половине мяч
-            on_own_half = True
-            if x is not None:
-                if self.side == "l" and x > 5:
-                    on_own_half = False
-                elif self.side == "r" and x < -5:
-                    on_own_half = False
+            # Защитник бежит только если мяч рядом (< 15)
+            # И нет тиммейта который ещё ближе
+            if ball_dist < 15:
+                teammates = input_data.get("teammates", [])
+                am_closest = True
+                for t in teammates:
+                    if t.get("dist", 9999) < ball_dist - 3:
+                        am_closest = False
+                        break
+                if am_closest:
+                    self.last = "defend"
+                    return {"new_action": "go_to_ball"}
 
-            if ball_dist < 20 and on_own_half:
-                self.last_action = "defend"
-                return {"new_action": "go_to_ball"}
-
-        # Вернуться на позицию
-        if self.last_action == "defend":
-            self.last_action = None
+        # 3. Вернуться на позицию
+        if self.last in ("defend", "kick"):
+            self.last = None
             return {"new_action": "return_home"}
 
         return None

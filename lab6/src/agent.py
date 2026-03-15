@@ -16,12 +16,12 @@ class InitError(Exception):
 
 class Agent:
     def __init__(self, team_name, controllers, version=7, is_goalie=False,
-                 role="midfielder", home_pos=(-15, 0)):
+                 role="forward", home_flag="fc"):
         self.team = team_name
         self.version = version
         self.is_goalie = is_goalie
         self.role = role
-        self.home_pos = home_pos
+        self.home_flag = home_flag
         self.side = None
         self.player_number = None
         self.game_mode = None
@@ -31,8 +31,8 @@ class Agent:
         self.x = None
         self.y = None
         self.visible_objects = {}
-        self.controllers = controllers  # Список иерархических контроллеров [low, mid, high]
-        self.start_pos = home_pos
+        self.controllers = controllers
+        self.start_pos = (-15, 0)
         self.last_heard_msg = None
         self.referee_msg = None
 
@@ -48,7 +48,7 @@ class Agent:
                 break
         else:
             self.stop()
-            raise InitError("Не удалось получить подтверждение инициализации от сервера")
+            raise InitError("Не удалось получить init от сервера")
 
     def _process_init_msg(self, data: str) -> bool:
         parsed = MsgParser.parse_msg(data)
@@ -57,17 +57,19 @@ class Agent:
         self.side = parsed[1]
         self.player_number = parsed[2]
         self.game_mode = parsed[3] if len(parsed) > 3 else None
-        # Обновляем side в контроллерах
         self._update_controllers_side()
         return True
 
     def _update_controllers_side(self):
-        """Обновляем side/team в контроллерах после init."""
         if self.controllers:
             low = self.controllers[0]
             low.side = self.side
             low.team = self.team
             low.player_number = self.player_number
+            # Обновляем side во всех контроллерах
+            for ctrl in self.controllers:
+                if hasattr(ctrl, 'side'):
+                    ctrl.side = self.side
 
     def move(self, x, y):
         self.socket.send(f"(move {x} {y})")
@@ -96,7 +98,6 @@ class Agent:
         if sender == "referee":
             msg_str = str(message)
             self.referee_msg = msg_str
-            print(f"[{self.role}#{self.player_number}] рефери: {msg_str}")
             if msg_str in ("play_on",):
                 self.play_on = True
             elif msg_str.startswith("kick_off"):
@@ -104,6 +105,11 @@ class Agent:
             elif msg_str.startswith("goal_"):
                 self.play_on = False
                 self.move(*self.start_pos)
+                # Сброс среднего контроллера
+                if len(self.controllers) > 1:
+                    mid = self.controllers[1]
+                    mid.action = "go_to_flag"
+                    mid.target_flag = mid.home_flag
         else:
             self.last_heard_msg = str(message)
 
@@ -137,23 +143,17 @@ class Agent:
 
             self.visible_objects[key] = entry
 
-        self._compute_my_position()
-
         if not self.play_on:
             self.last_heard_msg = None
             return
 
-        # Формируем входные данные для иерархического контроллера
         input_data = {
             "visible": self.visible_objects,
-            "x": self.x,
-            "y": self.y,
             "play_on": self.play_on,
             "last_heard_msg": self.last_heard_msg,
             "referee_msg": self.referee_msg,
         }
 
-        # Запускаем иерархический контроллер
         low = self.controllers[0]
         upper = self.controllers[1:]
         result = low.execute(input_data, upper)
@@ -165,37 +165,15 @@ class Agent:
         self.last_heard_msg = None
         self.referee_msg = None
 
-    def _compute_my_position(self):
-        flag_observations = []
-        for key, obj in self.visible_objects.items():
-            if key in FLAGS:
-                flag_observations.append((key, obj["dist"]))
-        if len(flag_observations) < 2:
-            return
-
-        f1_key, d1 = flag_observations[0]
-        f2_key, d2 = flag_observations[1]
-
-        if len(flag_observations) >= 3:
-            f3_key, d3 = flag_observations[2]
-            pos = compute_position_three_flags(f1_key, d1, f2_key, d2, f3_key, d3)
-            if pos is None:
-                pos = compute_position_two_flags(f1_key, d1, f2_key, d2)
-        else:
-            pos = compute_position_two_flags(f1_key, d1, f2_key, d2)
-
-        if pos:
-            self.x, self.y = pos
-
-    def run(self, start_pos: tuple[int, int]):
+    def run(self, start_pos: tuple):
         self.start_pos = start_pos
         self.connect()
         self.move(*start_pos)
         self.running = True
         print(
-            f"Команда: {self.team}, номер: {self.player_number}, "
-            f"сторона: {self.side}, роль: {self.role}, "
-            f"позиция: {start_pos}, вратарь: {self.is_goalie}"
+            f"[{self.team}] #{self.player_number} side={self.side} "
+            f"role={self.role} home_flag={self.home_flag} "
+            f"pos={start_pos} goalie={self.is_goalie}"
         )
         while self.running:
             data = self.socket.receive()

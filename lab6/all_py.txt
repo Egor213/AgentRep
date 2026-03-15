@@ -1,143 +1,261 @@
 
 
-# ===== FILE: src/passer_dt.py =====
+# ===== FILE: src/ctrl_low.py =====
 
-def create_passer_tree():
-    tree = {
-        "state": {
-            "status": "init", # init, move_to_fplc, move_to_ball, passing, wait_goal
-            "command": None,
-        },
-        "root": {
-            "exec": lambda mgr, state: _root_exec(mgr, state),
-            "next": "checkStatus",
-        },
-        "checkStatus": {
-            "condition": lambda mgr, state: state["status"] == "init",
-            "trueCond": "startMoving",
-            "falseCond": "checkMoveToFplc",
-        },
-        "startMoving": {
-            "exec": lambda mgr, state: state.__setitem__("status", "move_to_fplc"),
-            "next": "checkMoveToFplc",
-        },
-        "checkMoveToFplc": {
-            "condition": lambda mgr, state: state["status"] == "move_to_fplc",
-            "trueCond": "atFplc",
-            "falseCond": "checkMoveToBall",
-        },
-        "atFplc": {
-            "condition": lambda mgr, state: mgr.getDistance(mgr.getCenterFlag()) < 3,
-            "trueCond": "startMoveToBall",
-            "falseCond": "goToFplc",
-        },
-        "goToFplc": {
-            "condition": lambda mgr, state: mgr.getVisible(mgr.getCenterFlag()),
-            "trueCond": "approachFplc",
-            "falseCond": "searchFplc",
-        },
-        "searchFplc": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", "60")),
-            "next": "sendCommand",
-        },
-        "approachFplc": {
-            "condition": lambda mgr, state: abs(mgr.getAngle(mgr.getCenterFlag())) > 5,
-            "trueCond": "turnToFplc",
-            "falseCond": "dashToFplc",
-        },
-        "turnToFplc": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", str(int(mgr.getAngle(mgr.getCenterFlag()))))),
-            "next": "sendCommand",
-        },
-        "dashToFplc": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("dash", "80")),
-            "next": "sendCommand",
-        },
-        "startMoveToBall": {
-            "exec": lambda mgr, state: state.__setitem__("status", "move_to_ball"),
-            "next": "checkMoveToBall",
-        },
-        "checkMoveToBall": {
-            "condition": lambda mgr, state: state["status"] == "move_to_ball",
-            "trueCond": "atBall",
-            "falseCond": "checkPassing",
-        },
-        "atBall": {
-            "condition": lambda mgr, state: mgr.getDistance("b") < 0.7,
-            "trueCond": "startPassing",
-            "falseCond": "goToBall",
-        },
-        "goToBall": {
-            "condition": lambda mgr, state: mgr.getVisible("b"),
-            "trueCond": "approachBall",
-            "falseCond": "searchBall",
-        },
-        "searchBall": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", "60")),
-            "next": "sendCommand",
-        },
-        "approachBall": {
-            "condition": lambda mgr, state: abs(mgr.getAngle("b")) > 5,
-            "trueCond": "turnToBall",
-            "falseCond": "dashToBall",
-        },
-        "turnToBall": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", str(int(mgr.getAngle("b"))))),
-            "next": "sendCommand",
-        },
-        "dashToBall": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("dash", "100")),
-            "next": "sendCommand",
-        },
-        "startPassing": {
-            "exec": lambda mgr, state: state.__setitem__("status", "passing"),
-            "next": "checkPassing",
-        },
-        "checkPassing": {
-            "condition": lambda mgr, state: state["status"] == "passing",
-            "trueCond": "findScorer",
-            "falseCond": "waitGoal",
-        },
-        "findScorer": {
-            "condition": lambda mgr, state: mgr.getTeammateCount() > 0,
-            "trueCond": "passToScorer",
-            "falseCond": "rotateWithBall",
-        },
-        "rotateWithBall": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", "60")),
-            "next": "sendCommand",
-        },
-        "passToScorer": {
-            "exec": lambda mgr, state: _pass_exec(mgr, state),
-            "next": "sendCommand",
-        },
-        "waitGoal": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", "10")),
-            "next": "sendCommand",
-        },
-        "sendCommand": {
-            "command": lambda mgr, state: state["command"],
+# ===== FILE: src/ctrl_low.py =====
+
+from hierarchical_controller import HierarchicalController
+from flags import FLAGS
+
+
+class CtrlLow(HierarchicalController):
+    """
+    Нижний уровень — восприятие:
+    - Выделяет мяч, флаги, своих, чужих
+    - Определяет can_kick
+    - Определяет свои/чужие ворота по side
+    """
+
+    def __init__(self, team, side, role):
+        super().__init__()
+        self.team = team
+        self.side = side
+        self.role = role
+
+    def process(self, input_data):
+        visible = input_data.get("visible", {})
+
+        result = {
+            "visible": visible,
+            "play_on": input_data.get("play_on", False),
+            "last_heard": input_data.get("last_heard_msg"),
+            "referee_msg": input_data.get("referee_msg"),
+            "team": self.team,
+            "side": self.side,
+            "player_number": self.player_number,
+            "role": self.role,
+            "ball": None,
+            "can_kick": False,
+            "goal_own": None,
+            "goal_opp": None,
+            "flags": {},
+            "teammates": [],
+            "opponents": [],
         }
-    }
-    return tree
 
-def _root_exec(mgr, state):
-    state["command"] = None
+        # Мяч
+        if "b" in visible:
+            result["ball"] = visible["b"]
+            if visible["b"].get("dist", 9999) < 0.7:
+                result["can_kick"] = True
 
-def _pass_exec(mgr, state):
-    teammate = mgr.getClosestTeammate()
-    if teammate:
-        key, obj = teammate
-        angle = obj.get("dir", 0)
-        dist = obj.get("dist", 0)
-        # Сильный удар в сторону напарника
-        state["command"] = ("kick", f"{int(dist * 3 + 30)} {int(angle)}")
-        state["status"] = "wait_goal"
-        # Кричим "go" напарнику
-        state["say"] = "go"
-    else:
-        state["command"] = ("kick", "10 45")
+        # Ворота
+        goal_own_key = "gl" if self.side == "l" else "gr"
+        goal_opp_key = "gr" if self.side == "l" else "gl"
 
+        if goal_own_key in visible:
+            result["goal_own"] = visible[goal_own_key]
+        if goal_opp_key in visible:
+            result["goal_opp"] = visible[goal_opp_key]
+
+        # Флаги
+        for key, obj in visible.items():
+            if key in FLAGS:
+                result["flags"][key] = obj
+
+        # Игроки
+        for key, obj in visible.items():
+            name = obj.get("name", [])
+            if not isinstance(name, list) or len(name) < 2:
+                continue
+            if name[0] == "p":
+                team_name = str(name[1]).strip('"')
+                if team_name == self.team:
+                    result["teammates"].append(obj)
+                else:
+                    result["opponents"].append(obj)
+
+        return result
+
+    def merge(self, own_result, upper_result):
+        if upper_result and isinstance(upper_result, tuple):
+            return upper_result
+        if upper_result and isinstance(upper_result, dict):
+            if "command" in upper_result:
+                return upper_result["command"]
+            if "new_action" in upper_result:
+                own_result["new_action"] = upper_result["new_action"]
+        if isinstance(own_result, dict) and "cmd" in own_result:
+            return own_result["cmd"]
+        return None
+
+# ===== FILE: src/ctrl_high_goalie.py =====
+
+# ===== FILE: src/ctrl_high_goalie.py =====
+
+from hierarchical_controller import HierarchicalController
+
+
+class CtrlHighGoalie(HierarchicalController):
+    """
+    Верхний уровень — вратарь:
+    - Мяч рядом → отбить (в сторону чужих ворот или вбок)
+    - Мяч видим и близко → бросок к мячу
+    - Иначе → вернуться к воротам, обзор
+    """
+
+    def __init__(self, side):
+        super().__init__()
+        self.side = side
+        self.last = None
+
+    def process(self, input_data):
+        # 1. Мяч рядом — отбить
+        if input_data.get("can_kick"):
+            self.last = "kick"
+            goal_opp = input_data.get("goal_opp")
+            teammates = input_data.get("teammates", [])
+            # Пас тиммейту если есть
+            if teammates:
+                best = min(teammates, key=lambda t: t.get("dist", 9999))
+                angle = best.get("dir", 0)
+                dist = best.get("dist", 10)
+                power = min(100, int(dist * 4 + 30))
+                return ("kick", f"{power} {int(angle)}")
+            if goal_opp:
+                return ("kick", f"100 {int(goal_opp.get('dir', 0))}")
+            return ("kick", "60 45")
+
+        # 2. Мяч близко — бежать к нему
+        ball = input_data.get("ball")
+        if ball and ball.get("dist", 9999) < 25:
+            self.last = "defend"
+            return {"new_action": "go_to_ball"}
+
+        # 3. После защиты — вернуться
+        if self.last == "defend":
+            self.last = None
+            return {"new_action": "return_home"}
+
+        return None
+
+# ===== FILE: src/ctrl_mid.py =====
+
+# ===== FILE: src/ctrl_mid.py =====
+
+from hierarchical_controller import HierarchicalController
+
+
+class CtrlMid(HierarchicalController):
+    """
+    Средний уровень — тактика:
+    - go_to_flag: движение к указанному флагу (по ключу)
+    - scan_field: обзор поля (поворот пока не найдём мяч)
+    - go_to_ball: движение к мячу
+    - stay: стоять на месте (вратарь)
+
+    Ориентация ТОЛЬКО по видимым объектам, без координат.
+    """
+
+    def __init__(self, home_flag, role, side):
+        super().__init__()
+        self.home_flag = home_flag  # ключ флага (например "fplc")
+        self.role = role
+        self.side = side
+        self.action = "go_to_flag"
+        self.target_flag = home_flag
+        self.scan_steps = 0
+
+    def process(self, input_data):
+        result = dict(input_data)
+        result["cmd"] = None
+        result["mid_action"] = self.action
+
+        if self.action == "go_to_flag":
+            result["cmd"] = self._go_to_flag(input_data)
+        elif self.action == "scan_field":
+            result["cmd"] = self._scan_field(input_data)
+        elif self.action == "go_to_ball":
+            result["cmd"] = self._go_to_ball(input_data)
+        elif self.action == "return_home":
+            self.target_flag = self.home_flag
+            self.action = "go_to_flag"
+            result["cmd"] = self._go_to_flag(input_data)
+
+        return result
+
+    def merge(self, own_result, upper_result):
+        if upper_result and isinstance(upper_result, tuple):
+            return upper_result
+        if upper_result and isinstance(upper_result, dict):
+            if "command" in upper_result:
+                return upper_result["command"]
+            if "new_action" in upper_result:
+                new_act = upper_result["new_action"]
+                if isinstance(new_act, dict):
+                    # {"action": "go_to_flag", "flag": "fprc"}
+                    self.action = new_act.get("action", "go_to_flag")
+                    if "flag" in new_act:
+                        self.target_flag = new_act["flag"]
+                else:
+                    self.action = new_act
+                return self.process(own_result).get("cmd")
+        return own_result.get("cmd")
+
+    def _go_to_flag(self, data):
+        """Движение к целевому флагу по видимости."""
+        flags = data.get("flags", {})
+        target = self.target_flag
+
+        if target in flags:
+            obj = flags[target]
+            dist = obj.get("dist", 9999)
+            angle = obj.get("dir", 0)
+
+            if dist < 3:
+                # Достигли флага — переходим к обзору
+                self.action = "scan_field"
+                self.scan_steps = 0
+                return ("turn", "60")
+
+            if abs(angle) > 10:
+                return ("turn", str(int(angle)))
+
+            power = min(100, int(dist * 2 + 30))
+            return ("dash", str(power))
+
+        # Флаг не виден — крутимся
+        return ("turn", "45")
+
+    def _scan_field(self, data):
+        """Обзор поля — крутимся пока не увидим мяч."""
+        ball = data.get("ball")
+        if ball:
+            self.scan_steps = 0
+            return None  # Мяч виден — передаём управление наверх
+
+        self.scan_steps += 1
+        if self.scan_steps > 12:
+            self.scan_steps = 0
+        return ("turn", "30")
+
+    def _go_to_ball(self, data):
+        """Движение к мячу."""
+        ball = data.get("ball")
+        if not ball:
+            return ("turn", "45")
+
+        angle = ball.get("dir", 0)
+        dist = ball.get("dist", 9999)
+
+        if dist < 0.7:
+            return None  # Мяч достигнут — верхний уровень решит
+
+        if abs(angle) > 10:
+            return ("turn", str(int(angle)))
+
+        power = min(100, int(dist * 6 + 40))
+        return ("dash", str(power))
 
 # ===== FILE: src/socket_client.py =====
 
@@ -165,176 +283,221 @@ class SocketClient:
         self.sock.close()
 
 
-# ===== FILE: src/scorer_dt.py =====
+# ===== FILE: src/start_match.py =====
 
-def create_scorer_tree():
-    tree = {
-        "state": {
-            "status": "init", # init, move_to_fplb, move_to_fgrb, wait_pass, score
-            "command": None,
-        },
-        "root": {
-            "exec": lambda mgr, state: _root_exec(mgr, state),
-            "next": "checkHeardGo",
-        },
-        "checkHeardGo": {
-            "condition": lambda mgr, state: mgr.last_heard_msg == "go",
-            "trueCond": "startScoring",
-            "falseCond": "checkStatus",
-        },
-        "checkStatus": {
-            "condition": lambda mgr, state: state["status"] == "init",
-            "trueCond": "startMoving",
-            "falseCond": "checkMoveToFplb",
-        },
-        "startMoving": {
-            "exec": lambda mgr, state: state.__setitem__("status", "move_to_fplb"),
-            "next": "checkMoveToFplb",
-        },
-        "checkMoveToFplb": {
-            "condition": lambda mgr, state: state["status"] == "move_to_fplb",
-            "trueCond": "atFplb",
-            "falseCond": "checkMoveToFgrb",
-        },
-        "atFplb": {
-            "condition": lambda mgr, state: mgr.getDistance(mgr.getCornerFlag()) < 3,
-            "trueCond": "startMoveToFgrb",
-            "falseCond": "goToFplb",
-        },
-        "goToFplb": {
-            "condition": lambda mgr, state: mgr.getVisible(mgr.getCornerFlag()),
-            "trueCond": "approachFplb",
-            "falseCond": "searchFplb",
-        },
-        "searchFplb": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", "60")),
-            "next": "sendCommand",
-        },
-        "approachFplb": {
-            "condition": lambda mgr, state: abs(mgr.getAngle(mgr.getCornerFlag())) > 5,
-            "trueCond": "turnToFplb",
-            "falseCond": "dashToFplb",
-        },
-        "turnToFplb": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", str(int(mgr.getAngle(mgr.getCornerFlag()))))),
-            "next": "sendCommand",
-        },
-        "dashToFplb": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("dash", "80")),
-            "next": "sendCommand",
-        },
-        "startMoveToFgrb": {
-            "exec": lambda mgr, state: state.__setitem__("status", "move_to_fgrb"),
-            "next": "checkMoveToFgrb",
-        },
-        "checkMoveToFgrb": {
-            "condition": lambda mgr, state: state["status"] == "move_to_fgrb",
-            "trueCond": "atFgrb",
-            "falseCond": "checkWaitPass",
-        },
-        "atFgrb": {
-            "condition": lambda mgr, state: mgr.getDistance(mgr.getGoalCornerFlag()) < 3,
-            "trueCond": "startWaitPass",
-            "falseCond": "goToFgrb",
-        },
-        "goToFgrb": {
-            "condition": lambda mgr, state: mgr.getVisible(mgr.getGoalCornerFlag()),
-            "trueCond": "approachFgrb",
-            "falseCond": "searchFgrb",
-        },
-        "searchFgrb": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", "60")),
-            "next": "sendCommand",
-        },
-        "approachFgrb": {
-            "condition": lambda mgr, state: abs(mgr.getAngle(mgr.getGoalCornerFlag())) > 5,
-            "trueCond": "turnToFgrb",
-            "falseCond": "dashToFgrb",
-        },
-        "turnToFgrb": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", str(int(mgr.getAngle(mgr.getGoalCornerFlag()))))),
-            "next": "sendCommand",
-        },
-        "dashToFgrb": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("dash", "80")),
-            "next": "sendCommand",
-        },
-        "startWaitPass": {
-            "exec": lambda mgr, state: state.__setitem__("status", "wait_pass"),
-            "next": "checkWaitPass",
-        },
-        "checkWaitPass": {
-            "condition": lambda mgr, state: state["status"] == "wait_pass",
-            "trueCond": "waitForGo",
-            "falseCond": "checkScore",
-        },
-        "waitForGo": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", "10")),
-            "next": "sendCommand",
-        },
-        # После получения "go" бежим к мячу
-        "startScoring": {
-            "exec": lambda mgr, state: state.__setitem__("status", "score"),
-            "next": "checkScore",
-        },
-        "checkScore": {
-            "condition": lambda mgr, state: state["status"] == "score",
-            "trueCond": "atBallScore",
-            "falseCond": "waitGoalScorer",
-        },
-        "atBallScore": {
-            "condition": lambda mgr, state: mgr.getDistance("b") < 0.8,
-            "trueCond": "kickToGoal",
-            "falseCond": "goToBallScore",
-        },
-        "goToBallScore": {
-            "condition": lambda mgr, state: mgr.getVisible("b"),
-            "trueCond": "approachBallScore",
-            "falseCond": "searchBallScore",
-        },
-        "searchBallScore": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", "45")),
-            "next": "sendCommand",
-        },
-        "approachBallScore": {
-            "condition": lambda mgr, state: abs(mgr.getAngle("b")) > 5,
-            "trueCond": "turnToBallScore",
-            "falseCond": "dashToBallScore",
-        },
-        "turnToBallScore": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", str(int(mgr.getAngle("b"))))),
-            "next": "sendCommand",
-        },
-        "dashToBallScore": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("dash", "100")),
-            "next": "sendCommand",
-        },
-        "kickToGoal": {
-            "condition": lambda mgr, state: mgr.getVisible(mgr.getGoalFlag()),
-            "trueCond": "goalVisibleScore",
-            "falseCond": "goalInvisibleScore",
-        },
-        "goalVisibleScore": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("kick", f"100 {int(mgr.getAngle(mgr.getGoalFlag()))}")),
-            "next": "sendCommand",
-        },
-        "goalInvisibleScore": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("kick", "10 45")),
-            "next": "sendCommand",
-        },
-        "waitGoalScorer": {
-            "exec": lambda mgr, state: state.__setitem__("command", ("turn", "10")),
-            "next": "sendCommand",
-        },
-        "sendCommand": {
-            "command": lambda mgr, state: state["command"],
-        }
-    }
-    return tree
+# ===== FILE: src/start_match.py =====
 
-def _root_exec(mgr, state):
-    state["command"] = None
+"""
+Запуск матча: teamA vs teamB (по 7 игроков).
+    python start_match.py
+"""
 
+import subprocess
+import sys
+import time
+
+
+def main():
+    print("=" * 50)
+    print("Матч: teamA vs teamB (формация 1-3-3)")
+    print("=" * 50)
+
+    print("\n--- teamA (side l) ---")
+    p_a = subprocess.Popen([
+        sys.executable, "start_team.py",
+        "--team", "teamA",
+        "--side", "l",
+    ])
+    time.sleep(3)
+
+    print("\n--- teamB (side r) ---")
+    p_b = subprocess.Popen([
+        sys.executable, "start_team.py",
+        "--team", "teamB",
+        "--side", "r",
+    ])
+
+    print("\nМатч запущен! Ctrl+C для остановки.")
+
+    try:
+        p_a.wait()
+        p_b.wait()
+    except KeyboardInterrupt:
+        print("\nОстановка матча...")
+        p_a.terminate()
+        p_b.terminate()
+        p_a.wait()
+        p_b.wait()
+        print("Матч остановлен")
+
+
+if __name__ == "__main__":
+    main()
+
+# ===== FILE: src/start_team.py =====
+
+# ===== FILE: src/start_team.py =====
+
+"""
+Запуск полной команды из 7 игроков (1-3-3).
+Использование:
+    python start_team.py --team teamA --side l
+    python start_team.py --team teamB --side r
+"""
+
+import subprocess
+import sys
+import time
+import argparse
+
+
+ROLES = [
+    "goalie",
+    "defender_top",
+    "defender_center",
+    "defender_bottom",
+    "forward_top",
+    "forward_center",
+    "forward_bottom",
+]
+
+
+def start_team(team_name, side):
+    processes = []
+    for role in ROLES:
+        cmd = [
+            sys.executable, "main.py",
+            "--team", team_name,
+            "--role", role,
+            "--side", side,
+        ]
+        print(f"Запуск: {' '.join(cmd)}")
+        p = subprocess.Popen(cmd, cwd="src" if "src" not in sys.executable else ".")
+        processes.append(p)
+        time.sleep(0.15)
+
+    return processes
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Start a full team (7 players)")
+    parser.add_argument("--team", type=str, default="teamA")
+    parser.add_argument("--side", type=str, default="l", choices=["l", "r"])
+    args = parser.parse_args()
+
+    processes = start_team(args.team, args.side)
+
+    print(f"\nКоманда {args.team} (side={args.side}): {len(processes)} игроков")
+    print("Ctrl+C для остановки")
+
+    try:
+        for p in processes:
+            p.wait()
+    except KeyboardInterrupt:
+        print("\nОстановка...")
+        for p in processes:
+            p.terminate()
+        for p in processes:
+            p.wait()
+        print("Остановлено")
+
+
+if __name__ == "__main__":
+    main()
+
+# ===== FILE: src/ctrl_high_forward.py =====
+
+# ===== FILE: src/ctrl_high_forward.py =====
+
+from hierarchical_controller import HierarchicalController
+
+
+class CtrlHighForward(HierarchicalController):
+    """
+    Верхний уровень — нападающий:
+    - Мяч рядом → удар по воротам
+    - Мяч видим → бежать за ним (агрессивнее чем другие)
+    - Иначе → идти к атакующему флагу
+    """
+
+    def __init__(self, side, home_flag, attack_flag):
+        super().__init__()
+        self.side = side
+        self.home_flag = home_flag
+        self.attack_flag = attack_flag  # флаг ближе к чужим воротам
+        self.last = None
+
+    def process(self, input_data):
+        # 1. Мяч рядом — бить по воротам
+        if input_data.get("can_kick"):
+            self.last = "kick"
+            goal_opp = input_data.get("goal_opp")
+            if goal_opp:
+                dist = goal_opp.get("dist", 9999)
+                angle = goal_opp.get("dir", 0)
+                power = min(100, int(70 + dist))
+                return ("kick", f"{power} {int(angle)}")
+            # Ворота не видим — подбить мяч вбок и попробовать увидеть
+            return ("kick", "10 45")
+
+        # 2. Мяч виден — бежать за ним
+        ball = input_data.get("ball")
+        if ball:
+            ball_dist = ball.get("dist", 9999)
+            teammates = input_data.get("teammates", [])
+
+            # Нападающий бежит за мячом агрессивнее (порог 30, отрыв 8)
+            am_closest = True
+            for t in teammates:
+                if t.get("dist", 9999) < ball_dist - 8:
+                    am_closest = False
+                    break
+
+            if am_closest and ball_dist < 35:
+                self.last = "go_ball"
+                return {"new_action": "go_to_ball"}
+
+        # 3. Идти к атакующей позиции
+        if self.last in ("go_ball", "kick"):
+            self.last = None
+            return {"new_action": {"action": "go_to_flag", "flag": self.attack_flag}}
+
+        return None
+
+# ===== FILE: src/hierarchical_controller.py =====
+
+# ===== FILE: src/hierarchical_controller.py =====
+
+class HierarchicalController:
+    """
+    Базовый класс иерархического контроллера.
+    Каждый уровень: process -> передаёт наверх -> merge результатов.
+    """
+
+    def __init__(self):
+        self.memory = {}
+
+    def execute(self, input_data, upper_controllers):
+        result = self.process(input_data)
+
+        if upper_controllers:
+            next_ctrl = upper_controllers[0]
+            rest = upper_controllers[1:]
+            upper_result = next_ctrl.execute(result, rest)
+            return self.merge(result, upper_result)
+
+        return self.finalize(result)
+
+    def process(self, input_data):
+        return input_data
+
+    def merge(self, own_result, upper_result):
+        if upper_result:
+            return upper_result
+        return own_result
+
+    def finalize(self, result):
+        return result
 
 # ===== FILE: src/flags.py =====
 
@@ -453,6 +616,8 @@ class MsgParser:
 
 # ===== FILE: src/agent.py =====
 
+# ===== FILE: src/agent.py =====
+
 import time
 from socket_client import SocketClient
 from flags import FLAGS, obj_name_to_key
@@ -461,7 +626,6 @@ from geometry import (
     compute_position_two_flags,
     compute_position_three_flags,
 )
-from controller import Controller
 
 
 class InitError(Exception):
@@ -469,10 +633,13 @@ class InitError(Exception):
 
 
 class Agent:
-    def __init__(self, team_name, controller: Controller, version=7, is_goalie=False):
+    def __init__(self, team_name, controllers, version=7, is_goalie=False,
+                 role="forward", home_flag="fc"):
         self.team = team_name
         self.version = version
         self.is_goalie = is_goalie
+        self.role = role
+        self.home_flag = home_flag
         self.side = None
         self.player_number = None
         self.game_mode = None
@@ -482,9 +649,10 @@ class Agent:
         self.x = None
         self.y = None
         self.visible_objects = {}
-        self.controller = controller
+        self.controllers = controllers
         self.start_pos = (-15, 0)
         self.last_heard_msg = None
+        self.referee_msg = None
 
     def connect(self):
         goalie_str = " (goalie)" if self.is_goalie else ""
@@ -498,7 +666,7 @@ class Agent:
                 break
         else:
             self.stop()
-            raise InitError("Не удалось получить подтверждение инициализации от сервера")
+            raise InitError("Не удалось получить init от сервера")
 
     def _process_init_msg(self, data: str) -> bool:
         parsed = MsgParser.parse_msg(data)
@@ -507,7 +675,19 @@ class Agent:
         self.side = parsed[1]
         self.player_number = parsed[2]
         self.game_mode = parsed[3] if len(parsed) > 3 else None
+        self._update_controllers_side()
         return True
+
+    def _update_controllers_side(self):
+        if self.controllers:
+            low = self.controllers[0]
+            low.side = self.side
+            low.team = self.team
+            low.player_number = self.player_number
+            # Обновляем side во всех контроллерах
+            for ctrl in self.controllers:
+                if hasattr(ctrl, 'side'):
+                    ctrl.side = self.side
 
     def move(self, x, y):
         self.socket.send(f"(move {x} {y})")
@@ -535,17 +715,20 @@ class Agent:
         message = parsed[3] if len(parsed) > 3 else ""
         if sender == "referee":
             msg_str = str(message)
-            print(f"рефери говорит: {msg_str}")
+            self.referee_msg = msg_str
             if msg_str in ("play_on",):
                 self.play_on = True
             elif msg_str.startswith("kick_off"):
                 self.play_on = False
             elif msg_str.startswith("goal_"):
                 self.play_on = False
-                self.controller.reset()
                 self.move(*self.start_pos)
+                # Сброс среднего контроллера
+                if len(self.controllers) > 1:
+                    mid = self.controllers[1]
+                    mid.action = "go_to_flag"
+                    mid.target_flag = mid.home_flag
         else:
-            # От тиммейта или самого себя
             self.last_heard_msg = str(message)
 
     def _process_see(self, parsed: list):
@@ -578,62 +761,37 @@ class Agent:
 
             self.visible_objects[key] = entry
 
-        self._compute_my_position()
-
-        decision = self.controller.decide(
-            self.visible_objects,
-            self.play_on,
-            team=self.team,
-            side=self.side or "",
-            player_number=self.player_number or 0,
-            x=self.x,
-            y=self.y,
-            last_heard_msg=self.last_heard_msg
-        )
-        if decision:
-            cmd, params = decision
-            self._send_command(cmd, params)
-        
-        # Поддержка дополнительных команд (say)
-        dt_state = self.controller.dt.state
-        if dt_state.get("say"):
-            self.say(dt_state["say"])
-            dt_state["say"] = None
-
-        # Сбрасываем сообщение после обработки
-        self.last_heard_msg = None
-
-    def _compute_my_position(self):
-        flag_observations = []
-        for key, obj in self.visible_objects.items():
-            if key in FLAGS:
-                flag_observations.append((key, obj["dist"]))
-        if len(flag_observations) < 2:
+        if not self.play_on:
+            self.last_heard_msg = None
             return
 
-        f1_key, d1 = flag_observations[0]
-        f2_key, d2 = flag_observations[1]
+        input_data = {
+            "visible": self.visible_objects,
+            "play_on": self.play_on,
+            "last_heard_msg": self.last_heard_msg,
+            "referee_msg": self.referee_msg,
+        }
 
-        if len(flag_observations) >= 3:
-            f3_key, d3 = flag_observations[2]
-            pos = compute_position_three_flags(f1_key, d1, f2_key, d2, f3_key, d3)
-            if pos is None:
-                pos = compute_position_two_flags(f1_key, d1, f2_key, d2)
-        else:
-            pos = compute_position_two_flags(f1_key, d1, f2_key, d2)
+        low = self.controllers[0]
+        upper = self.controllers[1:]
+        result = low.execute(input_data, upper)
 
-        if pos:
-            self.x, self.y = pos
+        if result and isinstance(result, tuple) and len(result) == 2:
+            cmd, params = result
+            self._send_command(cmd, params)
 
-    def run(self, start_pos: tuple[int, int]):
+        self.last_heard_msg = None
+        self.referee_msg = None
+
+    def run(self, start_pos: tuple):
         self.start_pos = start_pos
         self.connect()
         self.move(*start_pos)
         self.running = True
         print(
-            f"Команда: {self.team}, номер: {self.player_number}, "
-            f"сторона: {self.side}, позиция: {start_pos}, "
-            f"вратарь: {self.is_goalie}"
+            f"[{self.team}] #{self.player_number} side={self.side} "
+            f"role={self.role} home_flag={self.home_flag} "
+            f"pos={start_pos} goalie={self.is_goalie}"
         )
         while self.running:
             data = self.socket.receive()
@@ -647,8 +805,71 @@ class Agent:
             self.socket.close()
         except Exception:
             pass
-        print("Агент остановлен")
+        print(f"Агент {self.role}#{self.player_number} остановлен")
 
+# ===== FILE: src/ctrl_high_defender.py =====
+
+# ===== FILE: src/ctrl_high_defender.py =====
+
+from hierarchical_controller import HierarchicalController
+
+
+class CtrlHighDefender(HierarchicalController):
+    """
+    Верхний уровень — защитник:
+    - Мяч рядом → отбить / пас тиммейту
+    - Мяч видим и близко (< 15) → перехватить
+    - Иначе → держать позицию у своего флага
+    """
+
+    def __init__(self, side, home_flag):
+        super().__init__()
+        self.side = side
+        self.home_flag = home_flag
+        self.last = None
+
+    def process(self, input_data):
+        # 1. Мяч рядом — отбить
+        if input_data.get("can_kick"):
+            self.last = "kick"
+            goal_opp = input_data.get("goal_opp")
+            teammates = input_data.get("teammates", [])
+
+            if teammates:
+                best = min(teammates, key=lambda t: t.get("dist", 9999))
+                angle = best.get("dir", 0)
+                dist = best.get("dist", 10)
+                power = min(100, int(dist * 3 + 30))
+                return ("kick", f"{power} {int(angle)}")
+
+            if goal_opp:
+                return ("kick", f"80 {int(goal_opp.get('dir', 0))}")
+            return ("kick", "50 0")
+
+        # 2. Мяч видим и близко — перехватить
+        ball = input_data.get("ball")
+        if ball:
+            ball_dist = ball.get("dist", 9999)
+
+            # Защитник бежит только если мяч рядом (< 15)
+            # И нет тиммейта который ещё ближе
+            if ball_dist < 15:
+                teammates = input_data.get("teammates", [])
+                am_closest = True
+                for t in teammates:
+                    if t.get("dist", 9999) < ball_dist - 3:
+                        am_closest = False
+                        break
+                if am_closest:
+                    self.last = "defend"
+                    return {"new_action": "go_to_ball"}
+
+        # 3. Вернуться на позицию
+        if self.last in ("defend", "kick"):
+            self.last = None
+            return {"new_action": "return_home"}
+
+        return None
 
 # ===== FILE: src/geometry.py =====
 
@@ -814,329 +1035,154 @@ def compute_object_position(
     return valid[0]
 
 
-# ===== FILE: src/defender_dt.py =====
-
-def create_defender_tree():
-    """
-    Дерево решений для защитника команды противника (teamB).
-    Защитник стоит на месте у своих ворот независимо от сообщений сервера.
-    Согласно заданию 4.2: два игрока противника должны стоять на месте
-    около каждой штанги для предотвращения offside.
-    """
-    tree = {
-        "state": {
-            "status": "stand",  # всегда стоит на позиции
-            "command": None,
-        },
-        "root": {
-            "exec": lambda mgr, state: _root_exec(mgr, state),
-            "next": "standGuard",
-        },
-        "standGuard": {
-            "exec": lambda mgr, state: _stand_exec(mgr, state),
-            "next": "sendCommand",
-        },
-        "sendCommand": {
-            "command": lambda mgr, state: state["command"],
-        }
-    }
-    return tree
-
-
-def _root_exec(mgr, state):
-    state["command"] = None
-
-
-def _stand_exec(mgr, state):
-    # Защитник просто стоит на месте, возможно небольшие повороты для "оживления"
-    # Команда turn с минимальным углом или dash 0 для имитации стояния
-    state["command"] = ("turn", "0")
-
-
-# ===== FILE: src/dt_manager.py =====
-
-class DTManager:
-    """
-    Предоставляет интерфейс для рутинных задач
-    """
-
-    def __init__(self):
-        self.visible = {}
-        self.team = ""
-        self.side = ""
-        self.player_number = 0
-        self.x = None
-        self.y = None
-        self.last_heard_msg = None
-
-    def update(
-        self,
-        visible_objects: dict,
-        team: str = "",
-        side: str = "",
-        player_number: int = 0,
-        x=None,
-        y=None,
-        last_heard_msg=None,
-    ):
-        self.visible = visible_objects
-        self.team = team
-        self.side = side
-        self.player_number = player_number
-        self.x = x
-        self.y = y
-        self.last_heard_msg = last_heard_msg
-
-    def getGoalFlag(self) -> str:
-        """Возвращает флаг ворот, которые нужно атаковать"""
-        return "gr" if self.side == "l" else "gl"
-
-    def getCenterFlag(self) -> str:
-        """Возвращает центральный флаг на своей половине поля"""
-        return "fplc" if self.side == "l" else "fprc"
-
-    def getCornerFlag(self) -> str:
-        """Возвращает угловой флаг на своей половине поля (верхний)"""
-        return "fplb" if self.side == "l" else "fprb"
-
-    def getGoalCornerFlag(self) -> str:
-        """Возвращает флаг у чужих ворот (для скоринга)"""
-        return "fgrb" if self.side == "l" else "fglt"
-
-    def getVisible(self, obj_key: str) -> bool:
-        return obj_key in self.visible
-
-    def getDistance(self, obj_key: str) -> float:
-        if obj_key in self.visible:
-            return self.visible[obj_key].get("dist", 9999)
-        return 9999
-
-    def getAngle(self, obj_key: str) -> float:
-        if obj_key in self.visible:
-            return self.visible[obj_key].get("dir", 0)
-        return 0
-
-    def getTeammates(self) -> list:
-        teammates = []
-        for key, obj in self.visible.items():
-            name = obj.get("name", [])
-            if not isinstance(name, list) or len(name) < 2:
-                continue
-            if name[0] == "p" and str(name[1]).strip('"') == self.team:
-                teammates.append((key, obj))
-        return teammates
-
-    def getTeammateCount(self) -> int:
-        return len(self.getTeammates())
-
-    def getClosestTeammate(self):
-        teammates = self.getTeammates()
-        if not teammates:
-            return None
-        return min(teammates, key=lambda t: t[1].get("dist", 9999))
-
-
-# ===== FILE: src/main_defender.py =====
-
-import argparse
-import sys
-import time
-from socket_client import SocketClient
-from msg_parser import MsgParser
-
-
-class StaticDefender:
-    """
-    Статичный защитник для teamB.
-    Занимает позицию и старается оставаться на месте через dash 0 и turn 0.
-    """
-
-    def __init__(self, team_name, pos_x, pos_y, version=7):
-        self.team = team_name
-        self.version = version
-        self.pos_x = pos_x
-        self.pos_y = pos_y
-        self.socket = SocketClient()
-        self.running = False
-        self.player_number = None
-        self.side = None
-        self.play_on = False
-        self.at_position = False
-
-    def connect(self):
-        cmd = f"(init {self.team} (version {self.version}))"
-        self.socket.send(cmd)
-
-        start = time.time()
-        while time.time() - start < 5:
-            data = self.socket.receive()
-            if data and self._process_init_msg(data):
-                break
-        else:
-            self.stop()
-            raise Exception("Не удалось получить подтверждение инициализации от сервера")
-
-    def _process_init_msg(self, data: str) -> bool:
-        parsed = MsgParser.parse_msg(data)
-        if not parsed or parsed[0] != "init":
-            return False
-        self.side = parsed[1]
-        self.player_number = parsed[2]
-        return True
-
-    def move(self, x, y):
-        self.socket.send(f"(move {x} {y})")
-
-    def dash(self, power):
-        self.socket.send(f"(dash {power})")
-
-    def turn(self, angle):
-        self.socket.send(f"(turn {angle})")
-
-    def run(self):
-        self.connect()
-        # Перемещаемся на позицию до play_on
-        self.move(self.pos_x, self.pos_y)
-        print(f"Защитник {self.team} #{self.player_number}: цель ({self.pos_x}, {self.pos_y})")
-
-        self.running = True
-        while self.running:
-            data = self.socket.receive()
-            if data:
-                parsed = MsgParser.parse_msg(data)
-                if not parsed:
-                    continue
-                    
-                if parsed[0] == "see":
-                    # После play_on используем dash 0 для стояния на месте
-                    if self.play_on:
-                        # Отправляем dash 0 для минимизации движения
-                        self.dash(0)
-                        
-                elif parsed[0] == "hear":
-                    if len(parsed) >= 4 and parsed[2] == "referee":
-                        msg = str(parsed[3])
-                        if msg.startswith("play_on"):
-                            self.play_on = True
-                            # Пытаемся занять позицию прямо перед стартом
-                            self.move(self.pos_x, self.pos_y)
-                            print("play_on - защитник на позиции")
-                        elif msg.startswith("goal_") or msg.startswith("kick_off"):
-                            self.play_on = False
-                            # После гола снова используем move
-                            self.move(self.pos_x, self.pos_y)
-                            print(f"Защитник возврат на позицию ({self.pos_x}, {self.pos_y})")
-
-    def stop(self):
-        self.running = False
-        try:
-            self.socket.send("(bye)")
-            self.socket.close()
-        except Exception:
-            pass
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Lab 4: Static Defender")
-    parser.add_argument("--team", type=str, default="teamB")
-    parser.add_argument("--x", type=float, default=47.0)
-    parser.add_argument("--y", type=float, default=6.0)
-    args = parser.parse_args()
-
-    agent = StaticDefender(
-        team_name=args.team,
-        pos_x=args.x,
-        pos_y=args.y,
-    )
-
-    try:
-        agent.run()
-    except KeyboardInterrupt:
-        agent.stop()
-    except Exception as e:
-        print(e)
-        agent.stop()
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
-
-
-# ===== FILE: src/decision_tree.py =====
-
-class DecisionTree:
-    """
-    Дерево решений состоит из узлов 3 видов:
-    - exec-узел: имеет функцию exec(mgr, state) и поле next
-    - condition-узел: имеет condition(mgr, state), trueCond, falseCond
-    - command-узел: имеет command(mgr, state), возвращает команду
-    """
-
-    def __init__(self, tree: dict):
-        self.tree = tree
-
-    @property
-    def state(self):
-        return self.tree["state"]
-
-    def execute(self, mgr):
-        return self._run(mgr, "root")
-
-    def _run(self, mgr, node_name: str):
-        node = self.tree[node_name]
-
-        # Узел exec - устанавливает action для обработки и переходит к след узлу
-        if "exec" in node:
-            node["exec"](mgr, self.state)
-            return self._run(mgr, node["next"])
-
-        # Узел condition - проверяет условие, и выбирает правильный узел
-        if "condition" in node:
-            cond = node["condition"](mgr, self.state)
-            if cond:
-                return self._run(mgr, node["trueCond"])
-            else:
-                return self._run(mgr, node["falseCond"])
-
-        # Узел command - возвращает команду для выполнения
-        if "command" in node:
-            return node["command"](mgr, self.state)
-
-        raise ValueError(f"Узел {node_name} не содержит exec/condition/command")
-
+# ===== FILE: src/main.py =====
 
 # ===== FILE: src/main.py =====
 
 import argparse
 import sys
-from controller import Controller
 
 from agent import Agent
+from ctrl_low import CtrlLow
+from ctrl_mid import CtrlMid
+from ctrl_high_goalie import CtrlHighGoalie
+from ctrl_high_defender import CtrlHighDefender
+from ctrl_high_forward import CtrlHighForward
+
+
+# Позиции флагов для каждой роли в зависимости от стороны
+# side "l": свои ворота слева, атакуем вправо
+# side "r": свои ворота справа, атакуем влево
+
+ROLE_CONFIG = {
+    "l": {
+        "goalie": {
+            "home_flag": "gl",
+            "start_pos": (-50, 0),
+        },
+        "defender_top": {
+            "home_flag": "fplt",
+            "start_pos": (-36, -20),
+        },
+        "defender_center": {
+            "home_flag": "fplc",
+            "start_pos": (-36, 0),
+        },
+        "defender_bottom": {
+            "home_flag": "fplb",
+            "start_pos": (-36, 20),
+        },
+        "forward_top": {
+            "home_flag": "fct",
+            "attack_flag": "fprt",
+            "start_pos": (-5, -20),
+        },
+        "forward_center": {
+            "home_flag": "fc",
+            "attack_flag": "fprc",
+            "start_pos": (-10, 0),
+        },
+        "forward_bottom": {
+            "home_flag": "fcb",
+            "attack_flag": "fprb",
+            "start_pos": (-5, 20),
+        },
+    },
+    "r": {
+        "goalie": {
+            "home_flag": "gr",
+            "start_pos": (-50, 0),
+        },
+        "defender_top": {
+            "home_flag": "fprt",
+            "start_pos": (-36, 20),
+        },
+        "defender_center": {
+            "home_flag": "fprc",
+            "start_pos": (-36, 0),
+        },
+        "defender_bottom": {
+            "home_flag": "fprb",
+            "start_pos": (-36, -20),
+        },
+        "forward_top": {
+            "home_flag": "fct",
+            "attack_flag": "fplt",
+            "start_pos": (-5, 20),
+        },
+        "forward_center": {
+            "home_flag": "fc",
+            "attack_flag": "fplc",
+            "start_pos": (-10, 0),
+        },
+        "forward_bottom": {
+            "home_flag": "fcb",
+            "attack_flag": "fplb",
+            "start_pos": (-5, -20),
+        },
+    },
+}
+
+
+def create_agent(team, role_key, side_hint="l"):
+    """
+    Создаёт агента. side_hint используется для определения стартовых позиций.
+    Реальный side обновляется после init от сервера.
+    """
+    config = ROLE_CONFIG[side_hint][role_key]
+    home_flag = config["home_flag"]
+    start_pos = config["start_pos"]
+    is_goalie = role_key == "goalie"
+
+    # Определяем базовый тип роли
+    if role_key == "goalie":
+        base_role = "goalie"
+    elif role_key.startswith("defender"):
+        base_role = "defender"
+    else:
+        base_role = "forward"
+
+    low = CtrlLow(team=team, side=side_hint, role=base_role)
+    mid = CtrlMid(home_flag=home_flag, role=base_role, side=side_hint)
+
+    if base_role == "goalie":
+        high = CtrlHighGoalie(side=side_hint)
+    elif base_role == "defender":
+        high = CtrlHighDefender(side=side_hint, home_flag=home_flag)
+    else:
+        attack_flag = config.get("attack_flag", "fc")
+        high = CtrlHighForward(side=side_hint, home_flag=home_flag, attack_flag=attack_flag)
+
+    controllers = [low, mid, high]
+
+    agent = Agent(
+        team_name=team,
+        controllers=controllers,
+        is_goalie=is_goalie,
+        role=role_key,
+        home_flag=home_flag,
+    )
+
+    return agent, start_pos
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Lab 4: Coordination")
+    parser = argparse.ArgumentParser(description="Lab 6: Team Play")
     parser.add_argument("--team", type=str, default="teamA")
-    parser.add_argument("--x", type=int, default=-15)
-    parser.add_argument("--y", type=int, default=0)
-    parser.add_argument("--goalie", action="store_true")
-    parser.add_argument("--role", type=str, choices=["passer", "scorer"], default="passer")
+    parser.add_argument("--role", type=str, default="forward_center",
+                        choices=[
+                            "goalie",
+                            "defender_top", "defender_center", "defender_bottom",
+                            "forward_top", "forward_center", "forward_bottom",
+                        ])
+    parser.add_argument("--side", type=str, default="l", choices=["l", "r"],
+                        help="Ожидаемая сторона (для стартовых позиций)")
     args = parser.parse_args()
 
-    controller = Controller(
-        is_goalie=args.goalie,
-        role=args.role
-    )
-
-    agent = Agent(
-        team_name=args.team,
-        is_goalie=args.goalie,
-        controller=controller,
-    )
+    agent, start_pos = create_agent(args.team, args.role, args.side)
 
     try:
-        agent.run(start_pos=(args.x, args.y))
+        agent.run(start_pos=start_pos)
     except KeyboardInterrupt:
         agent.stop()
     except Exception as e:
@@ -1147,59 +1193,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# ===== FILE: src/controller.py =====
-
-from decision_tree import DecisionTree
-from dt_manager import DTManager
-from passer_dt import create_passer_tree
-from scorer_dt import create_scorer_tree
-
-
-class Controller:
-    def __init__(self, actions: list[dict] = None, is_goalie: bool = False, role: str = "passer"):
-        self.is_goalie = is_goalie
-        self.role = role
-        self.manager = DTManager()
-
-        if is_goalie:
-            from goalie_dt import create_goalie_tree
-            tree_dict = create_goalie_tree()
-        elif role == "passer":
-            tree_dict = create_passer_tree()
-        else:
-            tree_dict = create_scorer_tree()
-
-        self.dt = DecisionTree(tree_dict)
-
-    def reset(self):
-        state = self.dt.state
-        if "next" in state:
-            state["next"] = 0
-            if "sequence" in state and state["sequence"]:
-                state["action"] = state["sequence"][0]
-        state["command"] = None
-        if "status" in state:
-            state["status"] = "init"
-
-    def decide(
-        self,
-        visible_objects: dict,
-        game_on: bool,
-        team: str = "",
-        side: str = "",
-        player_number: int = 0,
-        x=None,
-        y=None,
-        last_heard_msg=None,
-    ) -> tuple[str, str] | None:
-        if not game_on:
-            return None
-
-        self.manager.update(visible_objects, team, side, player_number, x, y, last_heard_msg)
-        result = self.dt.execute(self.manager)
-
-        if result and isinstance(result, tuple) and len(result) == 2:
-            return result
-        return None
